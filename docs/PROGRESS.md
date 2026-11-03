@@ -1,11 +1,11 @@
 # sirius-bridge 当前进度
 
-最后更新：2026-11-03
+最后更新：2026-11-04
 
 ## 当前状态：协议 1.12，动作层物品丢弃已接入
 
 - v2 两大板块为“完善接口底层 → 编写自带插件”。协议 1.10 的 block.get 与真实容器事务保持通过；1.11 新增 14 类核心事件；1.12 新增 `inventory.drop`，RPC 工具共 **33 个**。
-- `inventory.drop {slot,count?}` 通过原版 `ClickType.THROW` 丢弃指定 0..40 背包槽位物品，count 省略为整组；补齐盔甲 36..39→菜单 5..8、副手 40→菜单 45 映射。按客户端槽位回读返回 dropped/partial/unknown，不注入 Q。真机待验，规格见 `docs/sessions/2026-11-03-inventory-drop.md`。
+- `inventory.drop {slot,count?}` 通过原版 `ClickType.THROW` 丢弃指定 0..40 背包槽位物品，count 省略为整组；补齐盔甲 36..39→菜单 5..8、副手 40→菜单 45 映射。按客户端槽位回读返回 dropped/partial/unknown，不注入 Q。用户已完成真机测试，规格见 `docs/sessions/2026-11-03-inventory-drop.md`。
 - 新事件：block_update；entity_spawn/gone/hurt/death；item_pickup；player_join/leave；window_open/close/slot_update；held_item_changed；connection_state；baritone_state。
 - bridge 忠实投递客户端原始事件，不做业务筛选、合并、冷却或默认降频；筛选、背压、去重和处理策略由连接侧及后续脚本负责。
 - slot_update 来自真实服务端容器包，`server_packet` 不把某个包强行关联为一次操作成功；entity_death 在实体离开且 dead/dying 时发出，保留最近伤害来源。
@@ -14,7 +14,8 @@
 
 ## 当前验证与部署
 
-- 本次 `inventory.drop`：`./gradlew.bat build` 成功，**747 passed / 0 failed**，能力目录 33/33 且注册一致。新 jar 尚未部署，真机待验。
+- 本次 `inventory.drop`：`./gradlew.bat build` 成功，**747 passed / 0 failed**，能力目录 33/33 且注册一致。协议 1.12 jar 已部署，用户已完成 DSH/客户端真机测试。
+- 公开发布：当前快照已完成本机路径与身份信息脱敏；远程 `main` 已由无旧父提交的新历史覆盖，远程没有其它分支或标签引用旧历史。
 - 本次 `movement_look` 触发范围修复：`./gradlew.bat build` 成功，**735 passed / 0 failed**；新回归覆盖配置与 Baritone 导航双重门槛。新 jar 已部署，源/目标 SHA-256 均为 `415fc9260e4e505f6945554b16e47ea8a90b247788634676a18961c86046a3d1`，旧 jar 备份在 `build/runtime-backup/20261103-224946/`；用户已确认真机行走不再被抢占。
 - 核心事件基线 `./gradlew.bat build`：成功，**734 passed / 0 failed**；能力目录双向一致，协议 **1.11**。
 - 14 类事件均有本地真机通知：门与模组方块状态、实体生成/消失/受伤/死亡、物品拾取、容器窗口和服务端槽位包、快捷栏、Baritone、连接和本地玩家 join/leave。
