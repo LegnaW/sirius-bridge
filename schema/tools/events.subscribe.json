@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "EventLevel": {
+      "description": "事件分级。spec §8.2：CRITICAL→反射层立即或 L1 中断；WARNING→排队；INFO→缓冲。",
+      "enum": [
+        "CRITICAL",
+        "WARNING",
+        "INFO"
+      ],
+      "title": "EventLevel",
+      "type": "string"
+    }
+  },
+  "description": "events.subscribe({ types: [...], min_level })。协议 1.11 新增 block_update、entity_spawn/entity_gone/entity_hurt/entity_death、item_pickup、player_join/player_leave、window_open/window_close/slot_update、held_item_changed、connection_state、baritone_state。bridge 忠实投递原始事件；筛选、背压与处理由连接侧负责。",
+  "properties": {
+    "types": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Types",
+      "type": "array"
+    },
+    "min_level": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/EventLevel"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "types"
+  ],
+  "title": "EventsSubscribeParams",
+  "type": "object"
+}

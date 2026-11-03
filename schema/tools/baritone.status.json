@@ -1,0 +1,7 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "baritone.status()。v1.7 起直接读取 Baritone API 与 PathEvent，不再解析聊天回执。返回寻路状态、当前目标、BuilderProcess 状态、设置以及最近一次隧道任务。",
+  "properties": {},
+  "title": "BaritoneStatusParams",
+  "type": "object"
+}

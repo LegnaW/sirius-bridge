@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "container.clickSlot({slot,button?,mode?})。协议 1.10 的真实菜单点击原语。slot 使用 getGuiState.slots[].index；不依赖 GUI 坐标或窗口焦点。evidence=client_snapshot 只表示客户端已执行并回读，不代表服务端已确认。",
+  "properties": {
+    "slot": {
+      "maximum": 511,
+      "minimum": 0,
+      "title": "Menu slot index",
+      "type": "integer"
+    },
+    "button": {
+      "default": 0,
+      "maximum": 40,
+      "minimum": 0,
+      "title": "Button",
+      "type": "integer"
+    },
+    "mode": {
+      "default": "pickup",
+      "enum": [
+        "pickup",
+        "quick_move",
+        "swap",
+        "clone",
+        "throw",
+        "quick_craft",
+        "pickup_all"
+      ],
+      "title": "Click mode",
+      "type": "string"
+    }
+  },
+  "required": [
+    "slot"
+  ],
+  "title": "ContainerClickSlotParams",
+  "type": "object"
+}

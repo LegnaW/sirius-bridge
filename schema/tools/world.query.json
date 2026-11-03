@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "WorldQueryType": {
+      "description": "world.query 查询类型。spec §8.2。",
+      "enum": [
+        "blocks",
+        "entities"
+      ],
+      "title": "WorldQueryType",
+      "type": "string"
+    }
+  },
+  "description": "world.query({ type, range, filter?, cursor?, limit?, aggregate? })。spec §8.2。\n\nfilter 条目为方块 registry 名（``spruce_log`` 自动补 ``minecraft:`` 前缀）\n或 ``#tag``（``#minecraft:logs`` / 短写 ``#logs``）；缺省 = 不过滤（v1.0 行为）。\n\nv1.6 分页与聚合（用户2026-11-01：整片区域查询要反复试、还很费 token）：\n\n- ``cursor``：从命中序列的第几条开始返回（0 起，缺省 0）。命中序列恒按\n  **距玩家距离升序**，所以 ``cursor`` 天然就是\"翻页\"。\n- ``limit``：本次最多几条（1..512，缺省 128）。``has_more`` / ``next_cursor``\n  告诉 agent 还有没有、下次从哪继续。\n- ``aggregate``：只回**按类型的计数**（``counts: [{name, count}]``），不回逐条坐标。\n  \"半径 20 内各类石头各多少\"这种问题一次就够，不用把几百行方块塞进上下文。",
+  "properties": {
+    "type": {
+      "$ref": "#/$defs/WorldQueryType"
+    },
+    "range": {
+      "exclusiveMinimum": 0,
+      "title": "Range",
+      "type": "number"
+    },
+    "filter": {
+      "anyOf": [
+        {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Filter"
+    },
+    "cursor": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Cursor"
+    },
+    "limit": {
+      "anyOf": [
+        {
+          "maximum": 512,
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Limit"
+    },
+    "aggregate": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Aggregate"
+    }
+  },
+  "required": [
+    "type",
+    "range"
+  ],
+  "title": "WorldQueryParams",
+  "type": "object"
+}

@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "entity.attack({ uuid?, name?, radius?, count?, interval_ms?, wait_cooldown? })。v1.6 左键实体。\n\n与 ``entity.use`` 同一套目标解析；区别是走 ``gameMode.attack``。\n``wait_cooldown``（缺省 true）会等到攻击冷却好了再打——冷却没满时伤害按比例\n衰减，还会吃攻击速率惩罚。",
+  "properties": {
+    "uuid": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Uuid"
+    },
+    "name": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Name"
+    },
+    "radius": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0,
+          "maximum": 64,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Radius"
+    },
+    "count": {
+      "default": 1,
+      "maximum": 10,
+      "minimum": 1,
+      "title": "Count",
+      "type": "integer"
+    },
+    "interval_ms": {
+      "default": 600,
+      "maximum": 5000,
+      "minimum": 0,
+      "title": "Interval Ms",
+      "type": "integer"
+    },
+    "wait_cooldown": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Wait Cooldown"
+    }
+  },
+  "title": "EntityAttackParams",
+  "type": "object"
+}

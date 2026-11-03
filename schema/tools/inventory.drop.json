@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "inventory.drop({slot,count?})。协议 1.12 的玩家背包丢弃原语。slot 使用 inventory 的 0..40 容器下标；count 省略时丢出整组。通过原版 ClickType.THROW 动作层执行，不打开 GUI、不注入按键。",
+  "properties": {
+    "slot": {
+      "maximum": 40,
+      "minimum": 0,
+      "title": "Player inventory slot",
+      "type": "integer"
+    },
+    "count": {
+      "maximum": 64,
+      "minimum": 1,
+      "title": "Number to drop; omit for the whole stack",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "slot"
+  ],
+  "title": "InventoryDropParams",
+  "type": "object"
+}

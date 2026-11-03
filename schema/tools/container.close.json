@@ -1,0 +1,7 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "container.close({})。协议 1.10 关闭当前容器界面；没有容器时返回 no_container。",
+  "properties": {},
+  "title": "ContainerCloseParams",
+  "type": "object"
+}

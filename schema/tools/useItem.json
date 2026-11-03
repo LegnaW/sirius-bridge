@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "useItem({ hand?, times?, interval_ms?, timeout_ms? })。v1.6 用手里的东西。\n\n动机（用户2026-11-01）：``use`` 只能点方块；吃食物、穿盔甲、右手持物\n（钓竿/剪刀/桶/末影珍珠）这些**不需要目标方块**的右键动作没有原语。\n\n- ``hand``：main（缺省）/ off\n- ``times``：完整使用几次（1..10，缺省 1）。**一次\"按住到进度条走完\"才算一次**\n  （v1.6.2：食物/药水要按住 1.6 s 服务端才真扣，按一下只是\"开始使用\"）；\n  一次接一次的间隔由 ``interval_ms`` 控制\n- ``interval_ms``：两次使用之间的间隔（0..5000，缺省 300）\n- ``timeout_ms``：整次调用预算（200..10000，缺省 2000）；按住进度条期间会自动\n  放宽到\"按住预算 + 500 ms\"，所以默认值也够吃一个面包\n- 结果词表：``used``（真有变化：数量变了 / 饱食上升 / 饱和度上升 / 装备换了）/\n  ``incomplete``（按下被接受了，但数量、饱食、饱和度、装备都没动——没按住到\n  进度条走完、饱食已满或被服务端拒绝）/ ``no_effect``（手里东西没反应）/\n  ``screen_opened``（比如开背包以外的界面）/ ``gui_open``（按下前已有界面）/\n  ``timeout``（预算被砍且没有证据）/ ``not_in_game`` / ``not_using``",
+  "properties": {
+    "hand": {
+      "default": "main",
+      "enum": [
+        "main",
+        "off"
+      ],
+      "title": "Hand",
+      "type": "string"
+    },
+    "times": {
+      "default": 1,
+      "maximum": 10,
+      "minimum": 1,
+      "title": "Times",
+      "type": "integer"
+    },
+    "interval_ms": {
+      "default": 300,
+      "maximum": 5000,
+      "minimum": 0,
+      "title": "Interval Ms",
+      "type": "integer"
+    },
+    "timeout_ms": {
+      "anyOf": [
+        {
+          "maximum": 10000,
+          "minimum": 200,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Timeout Ms"
+    }
+  },
+  "title": "UseItemParams",
+  "type": "object"
+}

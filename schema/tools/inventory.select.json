@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "inventory.select({ slot })。v1.6 切换快捷栏选中格（0..8）。\n\n动机（用户2026-11-01）：背包只能读不能改，换手持物品得手搓 GUI 点击。\n这个原语只改**选中格**（``LocalPlayer.getInventory().selected``），\n不移动物品；要挪物品仍是 GUI 操作。",
+  "properties": {
+    "slot": {
+      "maximum": 8,
+      "minimum": 0,
+      "title": "Slot",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "slot"
+  ],
+  "title": "InventorySelectParams",
+  "type": "object"
+}

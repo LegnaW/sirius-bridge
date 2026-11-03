@@ -1,0 +1,14 @@
+{
+  "required": true,
+  "package": "io.sirius.bridge.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "client": [
+    "LivingEntityMixin",
+    "LevelChunkMixin",
+    "ClientPacketListenerMixin"
+  ],
+  "minVersion": "0.8",
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

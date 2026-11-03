@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "container.transfer({from_slot,to_slot,count?})。协议 1.10 的菜单内物品转移。缺省移动整组，count=1..128 时部分转移；执行前检查物品兼容性和目标容量。evidence=client_snapshot 不代表服务端已确认。",
+  "properties": {
+    "from_slot": {
+      "maximum": 511,
+      "minimum": 0,
+      "title": "Source menu slot index",
+      "type": "integer"
+    },
+    "to_slot": {
+      "maximum": 511,
+      "minimum": 0,
+      "title": "Destination menu slot index",
+      "type": "integer"
+    },
+    "count": {
+      "maximum": 128,
+      "minimum": 1,
+      "title": "Count; omit for the whole source stack",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "from_slot",
+    "to_slot"
+  ],
+  "title": "ContainerTransferParams",
+  "type": "object"
+}

@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "BaritoneTunnelParams",
+  "description": "通过 BuilderProcess.clearArea 开挖有限隧道，不调用 MineProcess。桥侧监视任务并复核目标区域。",
+  "type": "object",
+  "properties": {
+    "height": { "type": "integer", "minimum": 2, "maximum": 16 },
+    "width": { "type": "integer", "minimum": 1, "maximum": 16 },
+    "depth": { "type": "integer", "minimum": 1, "maximum": 256 },
+    "timeout_ms": { "type": "integer", "minimum": 5000, "maximum": 300000, "default": 120000 }
+  },
+  "required": ["height", "width", "depth"],
+  "additionalProperties": false
+}

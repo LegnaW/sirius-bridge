@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "inventory({ scope?, filter? })。M4.4 v1.4 背包结构化读（感知，恒放行）。\n\n动机：v1.3 之前读背包只能先按 E 开 GUI 再 getGuiState（侵入式：会挡输入、\n槽位坐标还需 gui-scaled→窗口像素换算），一次纯感知查询付出两次往返 + 换算风险。\n\nscope 限定读取的容器区段（缺省 all = 整个 ``Inventory`` 容器）：\n0-8 hotbar / 9-35 main / 36-39 armor / 40 offhand。``slot`` 语义恒为\n``Inventory`` 容器索引，与 getGuiState 的 ``container_slot`` 同一基准——\n**不要**用 ``Slot.index``（M2-C 真机教训：两者在容器打开时并不相等）。\n\nfilter 条目为物品 registry 名（``oak_log`` 自动补 ``minecraft:`` 前缀）或\n``#tag`` 写法（``#minecraft:logs`` / 短写 ``#logs``）；1..16 条，与\nworld.query filter 的契约对齐。缺省 = 不过滤。",
+  "properties": {
+    "scope": {
+      "anyOf": [
+        {
+          "enum": [
+            "all",
+            "hotbar",
+            "main",
+            "armor",
+            "offhand"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Scope"
+    },
+    "filter": {
+      "anyOf": [
+        {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 16,
+          "minItems": 1,
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Filter"
+    }
+  },
+  "title": "InventoryParams",
+  "type": "object"
+}

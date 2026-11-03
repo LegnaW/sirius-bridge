@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "place({ x, y, z, face?, item?, timeout_ms? })。M4.4 v1.4 放置原语（动作层）。\n\n**几何定义（关键，勿混）**：``face`` 是\"支撑方块相对目标格的方向\"，\n``supportPos = target.relative(face)``；点击的是支撑方块朝向目标的那一面\n（``face.getOpposite()``），命中点 = 支撑块中心沿该面外移 0.5。\n例：``face=down`` → 支撑方块在下 → 点它的 UP 面 → 新方块落在其上方。\n缺省 ``down`` = 放在地面/方块顶面（最常见用法）。\n\n- ``item`` 缺省 = 当前手持的物品；给了就先查快捷栏，再查主背包——v1.6 起\n  主背包里有会**自动换到当前选中格**（三次容器点击，等价于手动拖过去）；\n  换不动才回 ``not_in_hotbar``\n- ``timeout_ms`` 600..10000，缺省 3000（放置是单次交互，不需要 dig 那么长）\n- result 词表（brain 映射教学话术）：placed / already_placed（目标已是同种方块，\n  幂等成功）/ no_item / not_in_hotbar / blocked（目标不可替换）/ support_missing\n  （支撑格空气或液体）/ out_of_reach（眼到命中点 > 4.5，``-32602``）/\n  gui_open（有 GUI 时拒绝，防点击漏进界面）/ rejected_by_server / timeout /\n  not_placing",
+  "properties": {
+    "x": {
+      "title": "X",
+      "type": "integer"
+    },
+    "y": {
+      "title": "Y",
+      "type": "integer"
+    },
+    "z": {
+      "title": "Z",
+      "type": "integer"
+    },
+    "face": {
+      "default": "down",
+      "enum": [
+        "up",
+        "down",
+        "north",
+        "south",
+        "east",
+        "west"
+      ],
+      "title": "Face",
+      "type": "string"
+    },
+    "item": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Item"
+    },
+    "timeout_ms": {
+      "anyOf": [
+        {
+          "maximum": 10000,
+          "minimum": 600,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Timeout Ms"
+    }
+  },
+  "required": [
+    "x",
+    "y",
+    "z"
+  ],
+  "title": "PlaceParams",
+  "type": "object"
+}

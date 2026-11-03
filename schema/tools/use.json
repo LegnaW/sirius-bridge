@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "use({ x, y, z, face?, hand?, timeout_ms? })。M4.5 v1.5 右键使用原语（动作层）。\n\n第三个动作动词：dig（破坏）/ place（放置）/ **use（右键使用）**——开箱子、\n工作台、熔炉、门、活板门、按钮、拉杆、床、模组机器。缺它时 agent 只能\n``lookAt + input.click(button=right)`` 手动凑准星，而且**看不出有没有生效**。\n\n**face 语义与 place 相反，勿混**：``face`` 是被点击的**目标方块自己的面**\n（\"点箱子顶面\"），与 ``BlockHitResult`` 携带的一致；缺省 = auto，取方块中心\n指向眼睛的最大轴（玩家习惯点击的那一面）。门的上下半、拉杆朝向、床的半边都\n对面敏感。\n\n- ``hand``：``main``（缺省）/ ``off``——盾牌、图腾、双持模组走副手\n- ``timeout_ms``：600..10000，缺省 2000（右键要么几 tick 内出界面/翻状态，\n  要么就是没反应；只有「SUCCESS 但看不见」才值得等一秒）\n- result 词表（brain 映射教学话术）：used（看到效果，或交互被消费）/\n  screen_opened（出了界面，随带 ``screen_class``，可直接接 getGuiState 槽位）/\n  no_effect（无可见效果且交互未被消费——方块拒绝）/ rejected（客户端 FAIL）/\n  out_of_reach（眼到点击点 > 4.5，``-32602``）/ gui_open（按下前已有界面，\n  拒绝把点击漏进 GUI）/ not_using（瞄准未收敛或被新调用取代）\n- effect（证据，三选一）：``screen`` / ``block_changed``（含仅属性变化：\n  门 ``open=true`` 的 registry id 不变）/ ``none_visible``（游戏答 SUCCESS 但\n  本工具看不到可见变化：吃食物、点火、延迟生效的模组——此时报 no_effect 会\n  教 agent 无限重试）\n- interaction：``success`` / ``consume`` / ``pass``（方块没有交互——教学信号：\n  换面或换方块）/ ``fail``",
+  "properties": {
+    "x": {
+      "title": "X",
+      "type": "integer"
+    },
+    "y": {
+      "title": "Y",
+      "type": "integer"
+    },
+    "z": {
+      "title": "Z",
+      "type": "integer"
+    },
+    "face": {
+      "anyOf": [
+        {
+          "enum": [
+            "up",
+            "down",
+            "north",
+            "south",
+            "east",
+            "west"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Face"
+    },
+    "hand": {
+      "default": "main",
+      "enum": [
+        "main",
+        "off"
+      ],
+      "title": "Hand",
+      "type": "string"
+    },
+    "timeout_ms": {
+      "anyOf": [
+        {
+          "maximum": 10000,
+          "minimum": 600,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Timeout Ms"
+    }
+  },
+  "required": [
+    "x",
+    "y",
+    "z"
+  ],
+  "title": "UseParams",
+  "type": "object"
+}

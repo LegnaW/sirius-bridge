@@ -1,0 +1,7 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "getStats()。spec §8.2；v1.6 增补 window_focused / 时间 / 天气 / 群系。\n\n动机（用户2026-11-01）：窗口焦点是隐形前置条件（GUI 点击要求前台，否则\n``input.mouseMove`` 卡到超时），agent 只能瞎猜；而\"白天还是黑夜、下不下雨、\n在哪个群系\"以前只能截屏看。",
+  "properties": {},
+  "title": "GetStatsParams",
+  "type": "object"
+}

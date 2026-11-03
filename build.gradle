@@ -1,0 +1,152 @@
+plugins {
+    id 'java-library'
+    id 'net.neoforged.moddev' version '2.0.141'
+}
+
+version = mod_version
+group = mod_group_id
+
+base {
+    archivesName = mod_id
+}
+
+java {
+    toolchain.languageVersion = JavaLanguageVersion.of(java_version as int)
+}
+
+repositories {
+    mavenCentral()
+}
+
+neoForge {
+    version = project.neoforge_version
+
+    runs {
+        client {
+            client()
+            gameDirectory = file('runs/client')
+        }
+        server {
+            server()
+            gameDirectory = file('runs/server')
+        }
+        data {
+            data()
+            gameDirectory = file('runs/data')
+            programArguments.addAll '--mod', project.mod_id, '--all',
+                    '--output', file('src/generated/resources/').getAbsolutePath(),
+                    '--existing', file('src/main/resources/').getAbsolutePath()
+        }
+    }
+
+    mods {
+        "${mod_id}" {
+            sourceSet sourceSets.main
+        }
+    }
+}
+
+def baritoneApiJar = file("libs/baritone-api-neoforge-1.11.2.jar")
+tasks.register("downloadBaritoneApi") {
+    outputs.file(baritoneApiJar)
+    doLast {
+        baritoneApiJar.parentFile.mkdirs()
+        new URL("https://github.com/cabaletta/baritone/releases/download/v1.11.2/baritone-api-neoforge-1.11.2.jar")
+                .withInputStream { input -> baritoneApiJar.withOutputStream { output -> output << input } }
+        def actual = java.security.MessageDigest.getInstance("SHA-256")
+                .digest(baritoneApiJar.bytes).encodeHex().toString()
+        if (actual != "27d7cb3c715332dc1d85adcbd9c6998db0b97d41808ecfbe06ebce39fe2c8aba") {
+            baritoneApiJar.delete()
+            throw new GradleException("Baritone API jar checksum mismatch")
+        }
+    }
+}
+
+dependencies {
+    compileOnly files(baritoneApiJar) { builtBy "downloadBaritoneApi" }
+    // WebSocket server implementation (RFC 6455).
+    // Rationale: the Minecraft 1.21.1 client ships plain Netty modules only
+    // (buffer/codec/common/handler/transport - NO netty-codec-http, verified
+    // against the production client version JSON), so Netty's built-in
+    // WebSocket support (io.netty.handler.codec.http.websocketx.*) is not on
+    // the runtime classpath and hand-rolling RFC 6455 would be overkill.
+    // Java-WebSocket is bundled into the mod jar via NeoForge jar-in-jar.
+    jarJar(implementation("org.java-websocket:Java-WebSocket:1.5.7")) {
+        version {
+            strictly "[1.5.7,2)"
+            prefer "1.5.7"
+        }
+    }
+    // MC <= 1.21.8: jarJar libraries are not automatically on dev-run
+    // classpaths (production loads them from the nested jar). MDG exposes a
+    // per-run configuration named "<runName>AdditionalRuntimeClasspath" (it
+    // only exists after the neoForge{runs{}} block above is evaluated):
+    // this puts the library on the `gradlew runClient` classpath as well.
+    clientAdditionalRuntimeClasspath("org.java-websocket:Java-WebSocket:1.5.7")
+}
+
+var generateModMetadata = tasks.register("generateModMetadata", ProcessResources) {
+    var replaceProperties = [
+            minecraft_version_range : minecraft_version_range,
+            neo_form_version        : neo_form_version,
+            neoforge_loader_version_range: neoforge_loader_version_range,
+            neoforge_version        : neoforge_version,
+            mod_id                  : mod_id,
+            mod_name                : mod_name,
+            mod_license             : mod_license,
+            mod_version             : mod_version,
+            mod_authors             : mod_author,
+            mod_description         : mod_description
+    ]
+    inputs.properties replaceProperties
+    replaceProperties.putIfAbsent('project', project)
+    expand replaceProperties
+    from "src/main/templates"
+    into "build/generated/sources/modMetadata"
+}
+sourceSets.main.resources.srcDir generateModMetadata
+neoForge.ideSyncTask generateModMetadata
+
+// The tool JSON schemas live in this repository. This task copies the tool
+// schemas + index.json into the mod jar resources (under schema/) at build
+// time so capabilities/list always advertises the checked-in contract.
+var syncToolSchemas = tasks.register("syncToolSchemas", Sync) {
+    from("schema") {
+        include "index.json"
+        include "tools/*.json"
+        into "schema" // land under build/generated/resources/schema/...
+    }
+    // The destination dir becomes the resources srcDir root (see below), so
+    // the jar ends up with schema/index.json + schema/tools/*.json.
+    into layout.buildDirectory.dir("generated/resources")
+}
+sourceSets.main.resources.srcDir syncToolSchemas
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
+
+// ------------------------------------------------------------------ smoke test
+// In-process smoke test for the pure tool logic (validation / crop / JPEG
+// budget ladder / response assembly / world scan). No game is launched;
+// gson is the only runtime dependency (same version Minecraft 1.21.1 ships).
+dependencies {
+    testImplementation("com.google.code.gson:gson:2.10.1")
+}
+
+tasks.register("smokeTest", JavaExec) {
+    group = 'verification'
+    description = 'Runs io.sirius.bridge.SmokeMain (pure logic smoke test, no client).'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'io.sirius.bridge.SmokeMain'
+}
+
+// SmokeMain is a main() program, not a JUnit test, so the plain `test` task
+// discovers no tests; that is expected. `check` (and therefore `build`) runs
+// the smoke test instead.
+tasks.named('test') {
+    failOnNoDiscoveredTests = false
+}
+tasks.named('check') {
+    dependsOn 'smokeTest'
+}

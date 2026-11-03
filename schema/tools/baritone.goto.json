@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "BaritoneGoToParams",
+  "description": "直接通过 Baritone CustomGoalProcess API 前往坐标。两坐标使用 GoalXZ，三坐标使用包含 Y 的 GoalBlock。",
+  "type": "object",
+  "properties": {
+    "x": { "type": "integer", "description": "目标 X" },
+    "y": { "type": "integer", "description": "目标 Y；省略时使用 GoalXZ" },
+    "z": { "type": "integer", "description": "目标 Z" },
+    "allow_break": { "type": "boolean", "default": false },
+    "allow_place": { "type": "boolean", "default": false }
+  },
+  "required": ["x", "z"],
+  "additionalProperties": false
+}

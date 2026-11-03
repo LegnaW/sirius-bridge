@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "chat.history({ limit?, regex?, source?, since_ms? })。v1.6 读聊天记录。\n\n动机（用户2026-11-01）：某些提示（登录插件 ``✔ 登录成功``、Baritone 的\n``Going to: …``、模组自己的提示）只在**客户端聊天框**里出现，10 秒淡出，\n靠截图\"发完立刻截\"根本不可靠。\n\n``source``：``server``（服务端聊天，与 events 事件的 chat 同源）/\n``client``（客户端本地消息：**Baritone 回执**、模组提示、指令反馈）/\n``all``（缺省，按时间合并）。``regex`` 是 Java 正则，按整行匹配过滤。",
+  "properties": {
+    "limit": {
+      "anyOf": [
+        {
+          "maximum": 200,
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Limit"
+    },
+    "regex": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Regex"
+    },
+    "source": {
+      "default": "all",
+      "enum": [
+        "all",
+        "server",
+        "client"
+      ],
+      "title": "Source",
+      "type": "string"
+    },
+    "since_ms": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Since Ms"
+    }
+  },
+  "title": "ChatHistoryParams",
+  "type": "object"
+}

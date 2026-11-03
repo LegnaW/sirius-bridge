@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "BaritoneSettingsParams",
+  "description": "直接修改 Baritone 设置，不经过聊天命令。所有字段可选，省略表示保持不变。",
+  "type": "object",
+  "properties": {
+    "allow_break": { "type": "boolean" },
+    "allow_place": { "type": "boolean" },
+    "chat_control": { "type": "boolean" }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "entity.use({ uuid?, name?, radius?, hand?, at? })。v1.6 右键实体。\n\n动机（用户2026-11-01）：递东西、喂马、挤奶、剪羊毛、跟村民交易——右键实体是\n核心玩法，现在只能 ``lookAt`` 位置再 ``input.click``，靠准星凑，经常不准还慢。\n\n关键事实：**服务端只校验\"眼睛到碰撞箱的距离\"，不校验朝向**，朝向只是客户端\n用来\"选中\"实体的。所以只要目标在 3 格内，就没必要对准星。\n\n- ``at``：``center``（缺省 auto 走 ``interactAt``，盔甲架/挂画这类需要精确点）\n- 结果词表：``used`` / ``screen_opened``（村民交易、马、船）/ ``no_effect`` /\n  ``out_of_range``（附距离）/ ``gone``（实体会话中消失）/ ``gui_open``",
+  "properties": {
+    "uuid": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Uuid"
+    },
+    "name": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Name"
+    },
+    "radius": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0,
+          "maximum": 64,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Radius"
+    },
+    "hand": {
+      "default": "main",
+      "enum": [
+        "main",
+        "off"
+      ],
+      "title": "Hand",
+      "type": "string"
+    },
+    "at": {
+      "anyOf": [
+        {
+          "enum": [
+            "auto",
+            "center"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "At"
+    },
+    "timeout_ms": {
+      "anyOf": [
+        {
+          "maximum": 10000,
+          "minimum": 200,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Timeout Ms"
+    }
+  },
+  "title": "EntityUseParams",
+  "type": "object"
+}

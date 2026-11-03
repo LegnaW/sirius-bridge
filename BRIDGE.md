@@ -1,0 +1,1197 @@
+# sirius-bridge
+
+NeoForge mod running on the **real Minecraft client**, acting as the "eyes and hands" of the Sirius AI brain: screenshot capture, structured perception, input and action primitives, and event push. This is the standalone development repository for the bridge; its protocol schemas and build do not depend on a sibling checkout.
+
+> Current status: **protocol 1.12**, with 33 advertised tools covering perception,
+> single-block state, real container transactions, GUI and inventory state, input,
+> block/entity actions, events, client chat, and direct Baritone API control. The
+> schemas checked into `schema/` are the contract served by `capabilities/list`
+> and copied into the jar at build time.
+
+## Baritone API integration (protocols 1.7-1.9)
+
+The bridge calls Baritone's public Java API on the client main thread instead of
+using chat commands and parsing localized receipts:
+
+- `baritone.goto`: `GoalBlock` / `GoalXZ` through `CustomGoalProcess`;
+- `baritone.follow`: one visible player through `FollowProcess.follow(predicate)`,
+  with `follow_radius` (1..64, default 10) and safe movement settings;
+- `baritone.stop`: `FollowProcess.cancel()` plus `PathingBehavior.cancelEverything()`;
+- `baritone.settings`: direct `allowBreak` / `allowPlace` / `chatControl` settings;
+- `baritone.tunnel`: bounded `BuilderProcess.clearArea()` with task monitoring,
+  safe-setting restoration, and a final target-region air check;
+- `baritone.status`: API state plus `PathEvent` history, tunnel state, and
+  `follow.active/targets/radius`.
+
+### `baritone.follow` (protocol 1.9)
+
+Exactly one of `uuid` or `name` is required. UUID is the stable selector; names
+use an exact case-insensitive match. There is deliberately no "follow all players"
+entry. The target must be a non-self player in the client's entity tracking range,
+otherwise the call returns `target_not_found` without starting a process.
+
+A successful call returns `result:"following"`, the target identity and position,
+`follow_radius`, `allow_break` and `allow_place`. The radius defaults to **10**
+(agent-adjustable from 1 to 64); break and place both default to false. Starting
+follow cancels an existing path/tunnel and clears the previous path event. It is
+an immediate start result, not a promise that the target will remain loaded.
+`baritone.status.follow` exposes the current active flag, targets and radius;
+active follow has top-level state `following`. `baritone.stop` cancels follow.
+The plugin watches for target loss and stalls and applies its own notification
+policy; the bridge does not emit a synthetic follow-lost event.
+
+The runtime Baritone must be the **API build**, not `baritone-standalone`.
+`build.gradle` downloads and checksum-verifies the matching official
+`baritone-api-neoforge-1.11.2.jar` into the ignored `libs/` directory as a
+`compileOnly` dependency; Baritone itself is not bundled into the bridge jar.
+The integration deliberately does not expose `MineProcess` / `#mine`.
+
+## Versions
+
+| Component | Version |
+|---|---|
+| Minecraft | 1.21.1 |
+| NeoForge | 21.1.248 (1.21.1 line = 21.1.x) |
+| ModDevGradle | 2.0.141 |
+| Gradle wrapper | 9.2.0 |
+| Java | 21 (JDK 21 required) |
+| Java-WebSocket | 1.5.7 (bundled via NeoForge jar-in-jar) |
+
+> 2026-08-18: NeoForge dependency aligned from 21.1.233 to **21.1.248** to match the
+> HMCL test client instance `1.21.1-Sirius` (`.minecraft/versions/1.21.1-Sirius`),
+> whose NeoForge is 21.1.248.
+
+## The bridge server (M1-B)
+
+When the client reaches the title screen, the mod starts a WebSocket server:
+
+- **Address**: `ws://127.0.0.1:8765` - bound to loopback only, never reachable
+  from the network. Port is configurable (see below).
+- **Token handshake**: the first frame on every connection must be
+  `{"type":"hello","token":"...","protocol_version":"1.0"}`. On a matching token
+  the server replies `{"type":"hello_ack","ok":true,"protocol_version":"1.0"}`.
+  A wrong token, any other frame first, or 10 s of silence closes the
+  connection (close code 1008). Token comparison is constant-time.
+- **Token location**: `config/sirius_bridge.toml` (relative to the game
+  directory). On first launch a random 64-hex-char token is generated and
+  written there; it is also printed to `logs/sirius_bridge.log` (one `START`
+  line per launch). Rotate it by deleting the line (or setting `token = ""`)
+  and restarting the game.
+- **Config**: `config/sirius_bridge.toml` with `port` (default 8765), `token`,
+  and (M2-A) `input_enabled` / `rate_limit_per_sec` / `gui_click_evidence`
+  (see below), plus (M2-A2) `keep_running_unfocused` and (M2-D)
+  `permission`.
+- **Audit log**: `logs/sirius_bridge.log` - one line per server start/stop,
+  connect/disconnect, hello success/failure and every request (with the
+  resulting error code); every `input.*` call additionally writes an
+  `INPUT` line with a parameter summary and result (ok / rate_limited /
+  input_disabled / no_screen).
+- **Capabilities**: `capabilities/list` returns the frozen capabilities
+  (name/version/input_schema) assembled from the schema JSON files copied into
+  the jar at build time from `schema` (single source of truth;
+  see "Schema sync" below). Protocol version: `"1.12"`. The server rejects startup
+  if an advertised tool has no registered handler or a registered tool other than
+  the built-in `capabilities/list` method is not advertised.
+
+### Config file
+
+```toml
+port = 8765
+token = "<64 hex chars>"
+input_enabled = true          # master switch for input.* + look* (false -> error -32011)
+rate_limit_per_sec = 20       # combined input.* calls/s (token bucket, 1..1000)
+gui_click_evidence = true     # screenshot every GUI click -> logs/sirius_evidence/
+keep_running_unfocused = true # disable vanilla pause-on-lost-focus at runtime (M2-A2)
+permission = "full"           # M2-D tier: observe / input_gui / input_world / full
+movement_look = true          # follow travel direction only during active Baritone navigation
+```
+
+Missing keys are auto-added to an existing file on the next launch (the file
+is rewritten with defaults + comments, unknown keys ignored); invalid values
+fall back to the default plus a note in the log.
+
+### Currently implemented frames
+
+| Frame (brain -> mod) | Behaviour |
+|---|---|
+| `hello` (first frame only) | token check -> `hello_ack` or close 1008 |
+| `request` `capabilities/list` | capability list + `protocol_version` |
+| `request` `screenshot` | see "The perception tools" below |
+| `request` `getStats` | see "The perception tools" below |
+| `request` `world.query` / `block.get` | see "The perception tools" / "The block.get tool" below |
+| `request` `container.clickSlot` / `container.transfer` / `container.close` | see "The container tools" below |
+| `request` `input.key` / `input.text` / `input.mouseMove` / `input.click` | see "The input tools" below |
+| `request` `look` / `lookAt` | see "The look tools" below |
+| `request` `dig` | see "The dig tool (M3.5 v1.2)" below |
+| `request` `place` | see "The place tool (M4.4 v1.4)" below |
+| `request` `inventory` | see "The inventory tool (M4.4 v1.4)" below |
+| `request` `players` | see "The players tool (M4.4 v1.4)" below |
+| `request` `use` | see "The use tool (M4.5 v1.5)" below |
+| `request` `getGuiState` | see "The GUI state tool" below |
+| `request` `events.subscribe` | see "The event push channel" below |
+| `request` any other method | `-32601` `not implemented: <method>` (until M3) |
+| `task` (NEKO) | immediate `task_finished` `status=interrupted` `text="not implemented"`, `task_id` echoed verbatim (placeholder until M3) |
+| invalid JSON | `-32700` parse error |
+| non-object JSON / unknown frame type / malformed request | `-32600` invalid frame |
+
+Mod -> brain frames: `response` (always carries `type/id/result/error`
+exactly as the frozen schema prescribes) and `notification` (M2-B,
+outbound-only - see below).
+
+## The perception tools (M1-C)
+
+All four tools read game state on the client main (render) thread via
+`ToolContext.onMainThread`; the calling WebSocket thread blocks for the result
+(bounded, see below). Parameter violations of the frozen schemas answer
+`-32602` with a human-readable message.
+
+### `screenshot({ tier: "full"|"crop", bbox?, quality? })`
+
+Reads the **main framebuffer** - which in 1.21.1 contains the world, the hand
+**and the HUD/open GUI** (they are rendered into `Minecraft.getMainRenderTarget()`
+every frame), so the capture is literally what the player sees, GUI included;
+it also works on the title screen.
+
+- `tier:"full"` captures everything; `tier:"crop"` additionally requires
+  `bbox: [x, y, w, h]` (pixels, origin top-left; floats round, coordinates
+  clamp to the image, non-intersecting boxes -> `-32602`).
+- `quality`: JPEG quality 0-100, default 80.
+- The pixel download happens on the render thread (one frame, ~10-30 ms);
+  cropping, JPEG encoding and base64 run on the WebSocket thread so the game
+  is not stalled by encoding.
+- Size guard: if the base64 text exceeds ~2 MB, quality drops in steps of 10
+  down to 40; if it is still over, the image scales to a 1024 px longest edge
+  and the ladder repeats. Result:
+
+```json
+{"image_b64":"...","format":"jpeg","width":1920,"height":1080,
+ "taken_at":1724000000000,"quality":80,"downscaled":false}
+```
+
+(`quality` echoes the quality actually used; `downscaled:true` marks the
+1024 px fallback. The ~100 KB streaming pipeline from spec 8.2 belongs to the
+future event-push, not to this on-demand RPC.)
+- Failure mode: while the window is iconified the render loop stops draining
+  the task queue, so the tool gives up after 10 s with `-32603` instead of
+  hanging the connection.
+
+### `getStats()`
+
+Main-thread snapshot of the local player:
+
+```json
+{"in_game":true,"health":18.5,"food":17,"saturation":4.2,"air":300,
+ "xp_level":27,"xp_progress":0.6,"position":{"x":1.5,"y":64.0,"z":-12.25},
+ "dimension":"minecraft:overworld","game_mode":"survival",
+ "effects":[{"id":"minecraft:speed","duration":1200,"amplifier":1}],"alive":true}
+```
+
+Not in a world (title screen / disconnecting) answers `{"in_game": false}` -
+not an error. `game_mode` comes from the client player info with an
+ability-based fallback; `effects` lists active potion effects with registry
+ids (`Holder.getRegisteredName()`).
+
+### `world.query({ type: "blocks"|"entities", range })`
+
+`range` is a block radius (default 16, hard cap 64 -> `-32602` when over).
+Not in a world -> `{"in_game": false}`.
+
+- `type:"blocks"`: cubic scan around the player's block position; every
+  **non-air** block is returned as `{x, y, z, block: "minecraft:stone"}`
+  (unloaded chunks read as air and drop out). Capped at **512** entries -
+  beyond that `truncated:true` and enumeration stops (v1.0 semantics,
+  unchanged; note the stop happens at an arbitrary scan-order corner, so a
+  truncated unfiltered result may drop near blocks - callers wanting
+  nearest-first guarantees should use `filter`):
+
+```json
+{"blocks":[{"x":10,"y":64,"z":-3,"block":"minecraft:stone"}, ...],
+ "count":512,"truncated":true}
+```
+
+- **`filter` (v1.1, T6-hardened)**: optional array of block registry ids
+  (`"minecraft:oak_log"`, bare paths auto-namespaced) and/or `#tag`s
+  (`"#minecraft:logs"`; tags not supported for entities). The filtered path
+  collects ALL matches in the cube (bounded by a 4096-match memory guard),
+  sorts by distance to the player (block center, ascending), then caps at
+  **32** entries with `truncated:true` - so "truncated" never drops a NEAR
+  block (the T5a real-machine bug: cap-before-sort lost a 3.71-block target
+  at range 5.5 that range 4.0 could see; the T6 smoke test pins the
+  dense-scene and range-containment regressions).
+
+- `type:"entities"`: everything from `ClientLevel.entitiesForRendering()`
+  within `range` (3D distance, player included) as
+  `{uuid, name, type, position:{x,y,z}, health?}`. `health` is attached only
+  when the client knows it (`LivingEntity` with health > 0); client-side mob
+  health is often unsynced, treat it as best-effort. **`minecraft:item`
+  entities additionally carry `item`** (the dropped stack's registry id,
+  e.g. `"minecraft:oak_log"`) and `count` (stack size) - T7; the display
+  `name` is client-localized and cannot be matched against ids, so the
+  registry id rides along (same philosophy as blocks). Non-item entities
+  keep the exact pre-T7 shape. Capped at 128 entries:
+
+```json
+{"entities":[{"uuid":"...","name":"Zombie","type":"minecraft:zombie",
+              "position":{"x":5.0,"y":64.0,"z":0.5},"health":12.0},
+             {"uuid":"...","name":"Oak Log","type":"minecraft:item",
+              "position":{"x":5.5,"y":64.5,"z":0.5},
+              "item":"minecraft:oak_log","count":1}, ...],
+ "count":3}
+```
+
+Known cost note: a `range:64` block scan over open air touches ~2.1M block
+positions once (a few hundred ms on the main thread); dense scans hit the
+512 cap long before that.
+
+## The block.get tool (protocol 1.10)
+
+`block.get({x,y,z})` reads one exact block on the client main thread. Coordinates
+are required integers within ±30,000,000. Outside a world it returns the shared
+`{"in_game":false}` shape. Inside a world the response is:
+
+```json
+{"in_game":true,"x":10,"y":64,"z":-3,"status":"ok","loaded":true,
+ "min_y":-64,"max_y":319,"block":"minecraft:oak_door",
+ "state":{"facing":"north","half":"lower","hinge":"left","open":"true","powered":"false"}}
+```
+
+- `status:"ok"`: the chunk is loaded. `block` is the real registry id, including
+  `minecraft:air` and other air variants; `state` contains every block-state
+  property serialized to a string.
+- `status:"unloaded"`: the position is inside the build bounds but its chunk is
+  unavailable. `loaded:false`, `block:null`, `state:{}`. It is never converted to
+  air.
+- `status:"out_of_world"`: Y is outside the inclusive `min_y..max_y` build bounds;
+  the same null/empty shape distinguishes it from a temporarily unloaded chunk.
+
+## The container tools (protocol 1.10)
+
+`container.clickSlot`, `container.transfer` and `container.close` operate on the
+currently open `AbstractContainerScreen` through its real `AbstractContainerMenu`.
+They run on the client main thread and do not synthesize physical mouse motion,
+so GUI scaling, cursor position and window focus are not part of the contract.
+All three share the normal action permission/rate guard. `no_container` is a
+state result, not a JSON-RPC error.
+
+`slot`, `from_slot` and `to_slot` are **menu slot indices** (`Slot.index`), exactly
+matching `getGuiState.slots[].index`. They are not the nested container's
+`container_slot` and not the player inventory indices used by `inventory`.
+
+### `container.clickSlot({slot,button?,mode?})`
+
+- `slot`: required, 0..511 and dynamically checked against the current menu.
+- `button`: 0..40, default 0.
+- `mode`: `pickup` (default), `quick_move`, `swap`, `clone`, `throw`,
+  `quick_craft`, `pickup_all`; mapped to the corresponding `ClickType`.
+
+The action calls `MultiPlayerGameMode.handleInventoryMouseClick` once and returns
+`result:"clicked"`, the container id/screen class, click arguments,
+`carried_before/carried_after`, and `changed_slots`. `clicked` reports the action
+dispatch even when a particular click legitimately makes no visible change.
+
+### `container.transfer({from_slot,to_slot,count?})`
+
+Moves items between two slots of the current menu. Omitting `count` moves the
+whole source stack; an explicit count is 1..128. The primitive refuses these
+cases before changing anything: `no_op` (same slot), `carried_not_empty`,
+`empty_source`, `invalid_count`, `slot_forbidden` (menu rules), `incompatible`
+(different item/components), `not_enough_space`, and `slot_out_of_range`.
+
+A full move uses left-button pickup on source then destination. A partial move
+picks up the source, right-clicks the destination once per requested item, then
+returns the remainder to the source. The response reports `requested`, the
+observed destination increment `moved`, slot diffs and carried-stack state.
+`result:"transferred"` requires the full requested increment and an empty carried
+stack afterwards; otherwise the result is `unknown`, never a fabricated success.
+
+### `container.close({})`
+
+Calls the current container screen's normal close path, which closes the menu and
+sends the vanilla container-close packet. Returns `result:"closed"` and the old
+`screen_class`.
+
+### Container evidence semantics
+
+Every click/transfer response contains `evidence:"client_snapshot"` because
+`handleInventoryMouseClick` performs client prediction before the server answers.
+The returned slots and `moved` value are an immediate client-main-thread snapshot,
+**not a server-confirmation claim**. Timeout, disconnect or a later server
+rollback must be handled by reading the menu again; a future slot-update event can
+provide stronger confirmation without changing this evidence vocabulary.
+
+### Threading model
+
+WebSocket callbacks run on Java-WebSocket's own threads. Parsing, validation
+and dispatching happen there; any access to game state must be scheduled onto
+the client main (render) thread - `ToolContext.onMainThread(Runnable)` wraps
+`Minecraft.getInstance().execute(...)`. The M1-C tools block the WS thread on
+a latch until the main thread ran their task (10 s timeout: the render loop
+stops draining the queue while the window is iconified, so an unbounded wait
+would hang the connection). Heavy post-processing (JPEG encode/base64) runs
+on the WS thread; the render thread only pays for the framebuffer download.
+Writing frames back to the socket is thread-safe from any thread. Handlers
+are registered once at server start-up (`ToolRegistry`), so adding tools
+never touches the dispatcher.
+
+### Schema sync (single source of truth)
+
+The checked-in `schema/` directory is the bridge's protocol contract. `gradlew build`
+runs the `syncToolSchemas` task, which copies `schema/index.json` + `tools/*.json`
+into the jar under `schema/`. At runtime `capabilities/list` assembles its response
+from those resources; the mod never re-declares tool names or schemas by hand.
+Compatibility with external brain implementations is tested across repository
+boundaries, not by reading their working trees during the build.
+
+## The input tools (M2-A)
+
+The four input primitives are the "hands" of the bridge. They replay the
+**GLFW event callbacks** the real input pipeline uses - exactly what a human
+at the keyboard/mouse produces - instead of calling game action methods:
+
+| Tool | Event-layer path used |
+|---|---|
+| `input.key` | `KeyboardHandler.keyPress(window, key, scancode, PRESS, mods)` + scheduled `RELEASE` |
+| `input.text` | `KeyboardHandler.charTyped(window, codepoint, 0)` per Unicode codepoint (true CJK support) |
+| `input.mouseMove` | `MouseHandler.onMove(window, x, y)` |
+| `input.click` | `MouseHandler.onPress(window, button, PRESS/RELEASE, 0)` |
+
+(`keyPress` is public in 1.21.1; `charTyped`/`onPress`/`onMove` are private
+and reached via reflection so the full vanilla + NeoForge dispatch - screen
+key/mouse hooks, `KeyMapping.set/click`, view turning - runs verbatim.)
+Every callback is submitted to the client main thread via
+`Minecraft.execute`, the same marshalling vanilla's own GLFW callbacks do;
+the response waits (latch, 10 s timeout) only for the FIRST event of a call.
+Timed follow-ups (key RELEASE, click bursts) run on a scheduler thread and
+are submitted to the main thread at their due time.
+
+### `input.key({ code, duration_ms?, modifiers? })`
+
+- `code`: logical key name (`"E"`, `"W"`, `"ENTER"`, `"SPACE"`,
+  `"BACKSPACE"`, `"F3"`, `"LEFT_SHIFT"`, `"UP"`, `"NUMPAD5"`, ... - letters,
+  digits, function keys, modifiers, navigation, numpad, punctuation; see
+  `KeyCodes.java`) **or** a raw GLFW keycode integer (what the frozen schema
+  declares). Unknown names -> `-32602`.
+- `duration_ms`: hold time. Default 0 = tap, released after 50 ms; explicit
+  values > 0 hold the key that long (movement: `input.key("W", 500)`).
+  Cap 60000 -> `-32602` beyond.
+- `modifiers`: array of `"SHIFT"`/`"CTRL"`/`"ALT"`/`"SUPER"` -> GLFW mod
+  bits, forwarded to the key callback (reaches `Screen.keyPressed` mods
+  argument and mod-GUI hotkeys). Note: `Screen.hasShiftDown()` reads the
+  REAL OS keyboard state, so it does not see injected modifier bits - for
+  shift-dependent GUI logic inject a real `"LEFT_SHIFT"` key press around
+  the click instead.
+- `"ESC"` (aliases `ESCAPE`, GLFW 256) follows the vanilla dispatch exactly:
+  with a GUI open it reaches `Screen.keyPressed` -> `onClose()` (closes the
+  screen), in-game (no screen) it opens the pause menu via
+  `Minecraft.pauseGame(false)` - in singleplayer that pauses the world, so
+  the brain should treat it as a "stop" action and press it again /
+  click "Back to Game" to resume.
+- Result: `{"injected":true,"key":"E","glfw_key":69,"modifiers":0,
+  "duration_ms":50,"release_scheduled":true,"screen_open":false}`.
+
+### `input.text({ string })`
+
+Types text through the character callback (codepoint by codepoint, so
+Chinese etc. works) into whatever Screen is focused - e.g. chat after
+`input.key("T")`, or a search field. ENTER/BACKSPACE are separate keys: the
+caller composes `input.text` + `input.key`. Max 512 codepoints. If no screen
+is open nothing is delivered - the result says so instead of erroring:
+`{"delivered":0,"codepoints":3,"screen_open":false}`.
+
+### `input.mouseMove({ x, y })`
+
+Moves the internal cursor to `x,y` in **window client-area pixels, origin
+top-left** (the coordinate system of `MouseHandler`/GLFW cursor callbacks;
+on the standard test client this matches screenshot pixels 1:1). Coordinates
+clamp to the window. With a GUI open, widgets receive `mouseMoved` on the
+next frame; with no GUI and the mouse grabbed, the delta **turns the view**
+exactly like a human mouse move. Result includes the GUI-scaled position
+(`gui_scaled`) the game derives with the same formula `MouseHandler.onPress`
+uses - handy for GUI clicking math.
+
+### `input.click({ button, count? })`
+
+Clicks at the CURRENT cursor position (set it with `input.mouseMove`
+first). `button`: 0 left / 1 right / 2 middle. `count` (1..8, default 1):
+extra clicks repeat every 50 ms (press held 25 ms); count 2 = double-click.
+With a GUI open the press goes through `Screen.mouseClicked`; without one it
+is attack (left) / use (right) / pick (middle) via `KeyMapping`, and an
+ungrabbed cursor re-grabs first - all authentic paths.
+
+**GUI click evidence (spec 7.1)**: when a Screen is open and
+`gui_click_evidence = true`, the framebuffer is captured right before the
+press and saved as a small JPEG (longest edge 1024, quality 40) to
+`logs/sirius_evidence/evidence_click_<yyyyMMdd_HHmmssSSS>.jpg`; the file
+name and size come back in the result. Evidence failure never fails the
+click.
+
+Result: `{"clicked":true,"button":0,"count":1,"screen_open":true,
+"screen":"InventoryScreen","evidence":{"file":"...jpg","bytes":53210}}`.
+
+### Rate limiting, disable switch, errors
+
+All four tools share one token bucket: `rate_limit_per_sec` calls/s
+(default 20), bucket capacity = 1 s of allowance. Exceeding it answers
+
+- `-32010 rate_limited` (retry shortly),
+- `-32011 input_disabled` when `input_enabled = false`,
+- `-32012 permission_denied` when the `permission` tier vetoes the call
+  (M2-D, see below),
+- `-32602` for schema violations,
+- `-32603` when the main thread does not drain within 10 s (iconified
+  window) or a callback could not be reached.
+
+Each call writes an `INPUT` audit line (method, parameter summary, result)
+to `logs/sirius_bridge.log` in addition to the generic REQUEST line.
+
+### Input coordinate cheat sheet
+
+| Concept | Value |
+|---|---|
+| mouseMove origin | window top-left |
+| mouseMove units | client-area pixels (= screenshot pixels on the test client) |
+| GUI widget coords | `gui_scaled` returned by mouseMove (equals `MouseHandler`'s own conversion) |
+| view turning | delta between consecutive mouseMove positions, applied next frame when no GUI + mouse grabbed |
+
+### Unfocused-window behaviour (M2-A2)
+
+The "AI plays, human watches" scenario requires the world to keep ticking
+while the human focuses a terminal/browser. Two different mechanisms matter
+(verified against the 1.21.1 decompiled sources):
+
+**1. Pause on lost focus - disabled by the bridge.** Vanilla
+`GameRenderer.render` opens the pause menu (`pauseGame(false)` -> PauseScreen)
+500 ms after the window loses focus when `Options.pauseOnLostFocus` is true;
+in singleplayer the open PauseScreen is what freezes ticks. With
+`keep_running_unfocused = true` (the **default**), the bridge sets
+`Options.pauseOnLostFocus = false` **once at startup** (title screen reached,
+config loaded). In 1.21.1 the option is a plain `public boolean` field - not
+an `OptionInstance` - so a field write is the entire runtime API; F3+P proves
+the pattern (it flips the same field at runtime).
+
+- **`options.txt` is never written by the bridge** (we skip
+  `Options.save()`). Manual alternative: add `pauseOnLostFocus:false` to
+  `options.txt` yourself - the bridge then has nothing left to change.
+- Caveat: if the user saves options themselves later (any change in the
+  vanilla settings screen, or F3+P), vanilla persists **all** fields,
+  including our runtime `false`, into `options.txt`. That is vanilla
+  behaviour, not a bridge write; `keep_running_unfocused = false` stops the
+  bridge from touching the field (restore pausing via F3+P or the settings
+  screen).
+- This fixes *pausing* only - it does not make the unfocused window "active".
+
+**2. What still works while unfocused** (injected callbacks are plain method
+calls, not OS events; entry checks compare the window handle, never focus -
+verified in the 1.21.1 sources):
+
+| Path | Unfocused |
+|---|---|
+| `input.key` (KeyMapping: movement, inventory, chat, ...) | works - frames keep rendering |
+| `input.text` (chat/search fields via a Screen) | works |
+| `input.click` in a GUI (`Screen.mouseClicked`) | works |
+| `input.click` in-world (attack/use/pick via KeyMapping) | works while the mouse is grabbed |
+| `input.mouseMove` position tracking (GUI click math) | works (position always updates) |
+| `input.mouseMove` -> **view rotation** | **does not work** |
+| `input.click` **hold-to-mine** (continuous destroy) | **silently does nothing once the mouse grab was lost** - see below |
+| GUI hover/drag updates (`mouseMoved`/`mouseDragged`) | **do not work** |
+| acquiring the mouse grab while un-grabbed (e.g. clicking through the title screen) | **does not work** (`MouseHandler.grabMouse` checks focus) |
+| `dig` (action-layer hold) | **works** - calls `gameMode.startDestroyBlock`/`continueDestroyBlock` directly, no mouse-grab dependency |
+
+The view-rotation limitation is double-gated in vanilla:
+`MouseHandler.onMove` only accumulates deltas when `isWindowActive()`, and
+`handleAccumulatedMovement()` (which calls `turnPlayer`) is entirely wrapped
+in `if (isWindowActive())`. There is no vanilla switch for it - known
+limitation, to be resolved in M4 pathing (either keep the game window
+focused, which is the normal "human watches" setup, or add an action-layer
+`player.turn()` look primitive, which has no event-callback entry anyway).
+
+**Continuous mining has the same gate (M3.5-T6 real-machine finding):**
+vanilla's per-tick `Minecraft.handleKeybinds` only continues destroying while
+`mouseHandler.isMouseGrabbed()`, and `grabMouse()` REFUSES the (re)grab
+whenever the window is not active. Consequence: after ANY chat-screen
+open/close while the window is unfocused (exactly the "AI plays, human
+watches and alt-tabs" workflow), an injected `input.click` PRESS still sets
+the key state but nothing mines - no error anywhere. Two mitigations: (a)
+the `dig` tool's hold runs on the action layer (`gameMode` calls) and is
+immune; (b) for raw `input.click` holds, keep the game window focused (the
+documented supported setup).
+
+Iconified (minimized) remains the hard case from M1-C/M2-A: the render loop
+stops draining `Minecraft.execute` tasks, so tools answer `-32603` after the
+10 s latch timeout instead of hanging. Unfocused-but-visible is the supported
+"human alt-tabs away" case.
+
+## Action-first and server-legality constraint (v2)
+
+Agents and scripts use exact object/action-layer interfaces rather than routine physical mouse/keyboard clicking. Raw input is a fallback only when no suitable action interface exists. New or changed actions must validate legal interaction distance, line of sight, permission and parameters, and use the vanilla/mod interaction path; they must not construct out-of-range packets or bypass server rules.
+
+These checks prevent the bridge from deliberately issuing an out-of-scope request. They cannot guarantee acceptance: the server remains authoritative and may reject a legal-looking interaction for its own state, permission or mod rules. Rejection and unknown outcomes are reported honestly rather than converted into success.
+
+## The look tools (M2-D)
+
+`look` and `lookAt` set the player's view rotation absolutely - the gaze to
+pair with the M2-A hands (aiming, pathing, "look at what I'm talking about").
+
+- **Action layer, not event layer** (deliberate deviation from M2-A's
+  injection principle): view rotation has no GLFW event-callback entry a
+  human could produce for us - humans move the mouse, which becomes a
+  *delta*. `input.mouseMove` turning requires the window focused AND the
+  mouse grabbed (M2-A2 finding) and composes deltas; `look` instead writes
+  the rotation directly with the exact statement sequence of vanilla's own
+  `Entity.lookAt(Anchor, Vec3)` (1.21.1 sources): `setYRot`/`setXRot` (the
+  NaN-guarded setters), `yRotO`/`xRotO` kept in sync (otherwise the next
+  rendered frame smears from the old rotation), plus `setYHeadRot` so body
+  and head do not decouple for a frame. A `LocalPlayer` auto-syncs rotation
+  to the server next tick via `LocalPlayer.sendPosition` (PosRot packets) -
+  no packet work on our side.
+- **`look({yaw, pitch})`** - degrees, frozen-schema bounds `-180..180` /
+  `-90..90` (violations `-32602`). Yaw 0 = +Z (south), -90 = +X (east),
+  180/-180 = -Z (north); negative pitch is up - the F3 debug axes. Result:
+
+```json
+{"in_game": true, "looked": true, "yaw": -90.0, "pitch": 12.5,
+ "previous": {"yaw": 37.0, "pitch": 0.0}}
+```
+
+- **`lookAt({x, y, z, turn_speed_deg_s?})`** - world position to face. The rotation is vanilla's
+  `Entity.lookAt` math inverted-exactly: from the eye position
+  (`getEyePosition()`, i.e. feet + eye height) to the target,
+  `yaw = atan2(dz, dx) - 90°`, `pitch = -atan2(dy, horizontal)` (all wrapped
+  into the schema bounds); `distance` is the Euclidean eye-to-target
+  distance. Result:
+
+```json
+{"in_game": true, "looked": true, "target": {"x": 10.0, "y": 65.0, "z": -3.5},
+ "yaw": 14.04, "pitch": -11.31, "distance": 12.08}
+```
+
+- **`turn_speed_deg_s` (v1.2, 30..720)** - optional smooth turning: instead of
+  snapping, the view advances toward the target at a FIXED angular speed (one
+  step per client tick, 50 ms; both axes at the same speed, the axis with less
+  distance arrives first and holds), landing on the exact target once both
+  axes are within 1 deg. The call BLOCKS until the turn ends and answers
+  `{"converged": true/false, "elapsed_ms": ...}` - `converged:false` means a
+  newer `look`/`lookAt`/`dig` superseded the turn (the newest look always
+  wins) or it self-expired. Absent `turn_speed_deg_s` = the instant v1.0/v1.1
+  behaviour, byte-for-byte. `dig`'s internal aiming uses a fixed 300 deg/s.
+
+- Not in a world (title screen): `{"in_game": false, "looked": false}` - not
+  an error, the getStats convention.
+- Guard rails: `input_enabled = false` disables both (`-32011` - looking
+  around IS acting); the permission tier treats them as world-level actions
+  (`observe`/`input_gui` deny with `-32012`, see below). They are
+  deliberately NOT charged against the input token bucket - a one-field
+  write cannot flood the event pipeline, and M4 aiming will want high look
+  rates without starving `input.*`.
+- Known quirks: `lookAt` at the eye position itself is degenerate
+  (`atan2(0,0)=0` -> yaw -90, pitch 0 - the same harmless answer vanilla's
+  own `lookAt` gives); the rotation applies next rendered frame; while dead
+  the rotation still writes but the server may ignore it.
+
+## The dig tool (M3.5 v1.2)
+
+`dig({x, y, z, timeout_ms?})` is an **intelligent block-breaking primitive**:
+the brain sends intent ("dig this block") and gets a verdict, instead of
+hand-orchestrating lookAt + click-hold segments (which fight vanilla's
+progress-reset-on-release and burn minutes on occluded trunks - the M3.5-T5a
+lesson). Parameters: integer block coordinates REQUIRED;
+`timeout_ms` 600..30000, default 15000. One call = one input rate-limit token;
+audited like `input.*`; permission tier treats it as `Action.INPUT`
+(`input_world` allows it with no GUI open - same class as `input.*`).
+
+Pipeline (per call, game access on the client main thread):
+
+1. **Pre-checks**: in-world; permission/screen gate; eye-to-block-CENTER
+   distance <= 4.5 (beyond answers `-32602` with a "walk closer first"
+   teaching message); target air -> `already_air` (idempotent success);
+   safe-to-break minimal set: any of the six neighbours holding a liquid ->
+   `blocked_liquid` (breaking in would open a flow), a `FallingBlock` (sand /
+   gravel / concrete powder) directly above -> `blocked_falling`; both carry
+   a human-readable `reason`.
+2. **Smooth aim**: a `TurnController` turn at **300 deg/s** to the block
+   center (the "natural head turn" of T6); re-issued automatically if the
+   view drifts off (e.g. Baritone finishing its approach).
+3. **Monitored hold (action layer)**: instead of injecting a mouse PRESS
+   (whose continuous-destroy is double-gated on OS focus - see the
+   "Unfocused-window behaviour" section), the monitor calls the exact
+   gameMode methods vanilla's held-button path runs:
+   `startDestroyBlock` on press, `continueDestroyBlock` per tick,
+   `stopDestroyBlock` on release (+ hand swing). Per `ClientTickEvent.Post`
+   tick the pure `DigContracts.DigMonitor` decides:
+   - **Main signal**: target block turned air or a different registry id ->
+     release, `result:"broken"` (the crosshair having been chewing a
+     DIFFERENT block marks `broken_via_occluder:true` - leaves in front of a
+     trunk break first, then the trunk);
+   - **Occluder tolerance (hysteresis)**: the crosshair hitting another block
+     NEVER fails the dig - jitter included (Numen ExecHarness lesson);
+   - **Telemetry early-stop**: vanilla's `getDestroyStage()` (crack 0-9,
+     -1 idle) staying -1 for 40 pressing ticks -> `not_digging` (misaligned /
+     out of sync); aim never converging within 5 s -> `not_digging`;
+   - **Insta-mine**: `getDestroyProgress >= 1.0` (grass, some leaves) ->
+     short press of 3 ticks then release (protects the block behind), with
+     bounded retries;
+   - **Timeout** -> `timeout` (tool insufficient / protected - teaching, not
+     an error). A screen opening mid-dig aborts honestly (a held press must
+     never leak into a GUI); a new dig supersedes the old one.
+
+```json
+{"in_game": true, "result": "broken", "block": "minecraft:oak_log",
+ "elapsed_ms": 3935, "broken_via_occluder": true}
+```
+
+`result` vocabulary the brain maps to teaching phrases: `broken` /
+`already_air` / `timeout` / `not_digging` / `blocked_liquid` /
+`blocked_falling`.
+
+## The place tool (M4.4 v1.4)
+
+`place({x, y, z, face?, item?, timeout_ms?})` is the **placing** counterpart of
+`dig`: the brain says "put a block in THIS cell, supported from THAT side" and
+gets a verdict instead of hand-rolling `lookAt` + `input.click` (which only
+ever answers "I pressed the button"). `x/y/z` are the TARGET cell (where the new
+block ends up, must be replaceable), `face` is where the SUPPORT block sits
+relative to it (`up`/`down`/`north`/`south`/`east`/`west`, default `down` -
+placing onto the ground below), `item` is the block item to use (default = the
+current hand; bare names get `minecraft:`), `timeout_ms` 600..10000 (default
+3000: one interaction, unlike dig's hold).
+
+**Geometry (the part that must not be confused)**: `support = target.relative(face)`;
+the clicked face is the support block's face that POINTS AT the target
+(`face.getOpposite()`), and the hit point is the support block's centre pushed
+0.5 out along that face. `face:"down"` therefore clicks the UP face of the
+block below the target - "put it on the ground" - and the new block lands in the
+target cell. Every place reports the resolved cells back, so a mis-specified
+face is visible in the response instead of silently landing somewhere else.
+
+Pipeline (per call, game access on the client main thread):
+
+1. **Pre-checks**: in-world; permission tier, then `gui_open` (with any screen
+   open the use would be swallowed - or become a GUI click); eye-to-HIT-POINT
+   distance <= 4.5 (beyond answers `-32602` with a "walk closer first" teaching
+   message); the target already holding the wanted block -> `already_placed`
+   (idempotent success - checked BEFORE `blocked`, since a filled cell is by
+   definition not replaceable); target not replaceable -> `blocked` (a
+   container/workbench there would open its GUI instead of placing); support
+   cell air or a liquid -> `support_missing`; item resolution - an explicit
+   `item` is searched in the **hotbar only** (0-8), a hit further up answers
+   `not_in_hotbar`, a miss everywhere `no_item`.
+2. **Smooth aim** at the hit point at 300 deg/s (the dig aim speed): a placed
+   block's ORIENTATION (stairs, doors, beds, signs) comes from the player's yaw,
+   so the view has to land on the support face first.
+3. **Held-slot switch, then one tick of settling**: `Inventory.selected` is
+   written on the client, but `ServerboundSetCarriedItemPacket` rides the
+   connection flush of the tick; waiting one tick keeps the server's hand item
+   in sync before it resolves the use packet.
+4. **The use (action layer)**: `gameMode.useItemOn(player, MAIN_HAND,
+   BlockHitResult)` + `player.swing(MAIN_HAND)` - the statements vanilla's own
+   right-click path runs, hence focus-independent (the M3.5-T6 finding that
+   killed event-layer holds applies here identically).
+5. **Verdict**: the target cell's registry id is compared with the wanted block
+   every tick - equal -> `placed`. On timeout the cell is re-tested: still
+   replaceable -> `not_placing` (the use never landed), otherwise `timeout`
+   (something else filled it).
+
+```json
+{"in_game": true, "result": "placed", "block": "minecraft:oak_planks",
+ "at": {"x":10,"y":65,"z":-3}, "face": "down", "support": {"x":10,"y":64,"z":-3},
+ "elapsed_ms": 180, "slot": 3}
+```
+
+`result` vocabulary the brain maps to teaching phrases: `placed` /
+`already_placed` / `no_item` / `not_in_hotbar` / `blocked` / `support_missing` /
+`out_of_reach` (`-32602`, never a result payload) / `gui_open` /
+`rejected_by_server` / `timeout` / `not_placing`. `block` is JSON `null` when
+nothing resolved; `slot` is omitted for the checks that never picked one;
+`reason` explains `blocked` / `support_missing` / aborts.
+
+Known limits / pitfalls:
+
+- **One call = one input token**, audited as
+  `INPUT method=place x,y,z face=.. result=..`; `observe` denies it (`-32012`),
+  `input_world`/`full` allow it with no screen open (same class as `dig`).
+- **One active place at a time**: a new call supersedes the old one (its waiter
+  is released with `not_placing`), and a screen opening mid-flight aborts the
+  same way - nothing is ever held down, so "abort" means "stop monitoring".
+- **`rejected_by_server` is best-effort**: it fires only when the client-side
+  `useItemOn` answers `InteractionResult.FAIL` immediately (world border, a
+  block that refuses). Server-side rejections are not visible to the client and
+  surface as `timeout`/`not_placing`.
+- **Attachable blocks** (torches, lanterns, rails) additionally need their own
+  `canSurvive` to hold: a placement that the server undoes lands in
+  `not_placing`/`timeout`, not in a special result.
+- **`consumed` is deliberately absent** (creative mode places without
+  consuming; a per-mode count would be noise this round).
+- The response is a snapshot: the cell can change again immediately afterwards.
+
+## The use tool (M4.5 v1.5)
+
+`use({ x, y, z, face?, hand?, timeout_ms? })` - right-click a block, the third
+action verb next to `dig` (break) and `place` (put down).
+
+Why it exists: protocol 1.4 had an atomic primitive for breaking and one for
+placing, but the third right-click verb only existed as `input.click(button=1)`
+- the event layer, which neither aims nor reports whether anything happened. A
+brain that has to hand-roll `lookAt + click` nudges the crosshair for several
+turns and then cannot tell a chest screen from a stone block that refused the
+interaction.
+
+Lifecycle: reach check (eye to click point <= 4.5) -> smooth aim at the click
+point (300 deg/s) -> one `gameMode.useItemOn(player, hand, hit)` + swing (the
+action layer, so it works while the window is unfocused) -> per-tick evidence.
+
+`face` is the face OF THE TARGET BLOCK that gets clicked (unlike `place`, where
+it names where the support block sits). Omitting it means AUTO: the axis from
+the block centre toward the eye, i.e. the side a human clicks by habit.
+
+The verdict is three independent fields, because one word cannot stay honest:
+
+| field | values | meaning |
+|---|---|---|
+| `result` | `used` / `screen_opened` / `no_effect` / `rejected` / `out_of_reach` / `gui_open` / `not_using` | what the tool decided happened |
+| `effect` | `screen` / `block_changed` / `none_visible` | the evidence it saw (`none_visible` = the game answered SUCCESS but nothing is visible yet: eating, lighting, a delayed mod effect) |
+| `interaction` | `success` / `consume` / `pass` / `fail` | the `InteractionResult` the client got (`pass` = "this block has no interaction" - the teaching signal for "try another face") |
+
+Precedence is deliberate: a screen appearing or the block state flipping is
+EVIDENCE and outranks the timeout (a slow server that answers at 2001 ms still
+succeeded); a door's `open=true` counts as a change even though its registry id
+stays the same; `FAIL` is the only immediate refusal; a timeout after a CONSUMED
+interaction still reports `used` with `effect=none_visible`, because claiming
+`no_effect` there would teach the brain to retry a working action forever.
+
+A screen that opens BEFORE the press is somebody else's GUI (`gui_open`,
+refused); a screen that opens AFTER it is the verdict (`screen_opened`, carrying
+`screen_class` so the brain can jump straight to `getGuiState` slots).
+
+## The inventory tool (M4.4 v1.4)
+
+`inventory({scope?, filter?})` reads the player's own inventory structurally -
+the alternative to "press E, then `getGuiState`", which is intrusive (the
+screen blocks input while open) and needs a GUI-scaled -> window-pixel
+conversion just to click a slot.
+
+- `scope`: `all` (default) / `hotbar` (0-8) / `main` (9-35) / `armor` (36-39) /
+  `offhand` (40) - container indices of the `Inventory`, the SAME basis as
+  `getGuiState`'s `container_slot` (never `Slot.index`).
+- `filter` (1..16): item registry ids (bare names get `minecraft:`) and/or
+  `#tag`s (`"#minecraft:logs"`, short form `"#logs"`), matched against the real
+  item registry - same contract as `world.query`'s filter.
+
+```json
+{"in_game": true, "selected": 3,
+ "slots": [{"slot":0,"item":"minecraft:oak_log","count":12,"role":"hotbar"},
+           {"slot":1,"item":null,"count":0,"role":"hotbar"}],
+ "empty_hotbar": [1,2,4,5,6,7,8], "empty_main": [9,11,12],
+ "counts": {"minecraft:oak_log": 12}, "matching": [0]}
+```
+
+Response conventions:
+
+- **no `filter`**: `slots` is the structural map of the scope, EMPTY slots
+  included (`item: null`, `count: 0`) - and `matching` is an empty array;
+- **with `filter`**: `slots` lists only the matching NON-EMPTY slots (what the
+  caller asked for) and `matching` carries their container indices, so
+  "where are my logs" is one request;
+- **`counts`** aggregates over exactly the reported slots (ids summed, first
+  appearance order), so a filtered call answers "how much of these do I have";
+- **`empty_hotbar` / `empty_main`** are always the FULL emptiness lists of the
+  player inventory (0-8 / 9-35), independent of scope and filter: callers use
+  them to choose a destination slot, and narrowing them would defeat that;
+- `role` is the same vocabulary `getGuiState` uses (`hotbar`/`player`/`armor`/
+  `offhand`), from the same function - armor/offhand stay distinguishable so a
+  storage filter never drags a helmet onto the wrong slot (M2-C lesson);
+- **not in a world**: `{"in_game": false, "slots": [], "selected": -1,
+  "counts": {}}` - not an error (the getStats convention).
+- Pure perception: **always allowed** - no rate-limit token, no permission
+  tier, no `input_enabled` gate (the `observe` tier may read the backpack).
+
+## The inventory.drop tool (protocol 1.12)
+
+`inventory.drop({slot,count?})` drops from a player-inventory slot without opening a GUI or injecting Q. `slot` uses the same 0..40 `Inventory` container indices as `inventory`; the bridge maps them to the real `InventoryMenu` slots (hotbar 36..44, main 9..35, armor 5..8, offhand 45). `count` is an optional integer 1..64; omitting it drops the whole stack.
+
+The action calls `MultiPlayerGameMode.handleInventoryMouseClick` on `player.inventoryMenu` with vanilla `ClickType.THROW`: button 1 once for a whole stack, or button 0 `count` times for an exact count. Empty slots, counts above the available stack, forbidden pickups, a non-empty carried stack, and another container menu being active return `empty_slot` / `count_exceeds_stack` / `slot_forbidden` / `carried_item` / `container_open` without acting.
+
+The bridge copies the stack before acting, then polls the client slot for up to 2 seconds. `dropped` requires the observed decrease to equal the request; `partial` reports a smaller decrease; no decrease, growth, or item replacement returns `unknown`. Every in-game answer includes `item/requested/dropped/before/remaining` and `evidence:client_snapshot`; sending the click request alone is not reported as success.
+
+## The players tool (M4.4 v1.4)
+
+`players()` takes **no parameters** (any member answers `-32602`, the
+getGuiState discipline) and lists who is on this server:
+
+```json
+{"in_game": true, "count": 2,
+ "players": [{"name":"Sirius","uuid":"...","self":true,"latency_ms":0,"gamemode":"creative"},
+             {"name":"Steve","uuid":"...","self":false,"latency_ms":42,"gamemode":"survival"}]}
+```
+
+- **Source**: `ClientPacketListener.getOnlinePlayers()` (`PlayerInfo`:
+  `getProfile().getName()/getId()`, `getLatency()`, `getGameMode().getName()`).
+  `self` compares the profile uuid with the local player's uuid.
+- **Ordering**: `self` first, then name dictionary order - the client's own
+  collection order is hash-backed, and a stable order is what makes replays and
+  assertions deterministic.
+- **Minimal exposure**: name/uuid/self/latency/gamemode only - no skin, no
+  address, no team. It answers "who is here" and resolves the `chat` event's
+  `sender` uuid to a name (`world.query` only sees entities inside the render
+  distance).
+- Not in a world: `{"in_game": false, "count": 0, "players": []}` - not an
+  error. Always allowed (pure perception).
+
+## Permission tiers (M2-D)
+
+`permission` in `config/sirius_bridge.toml` gates every ACTING tool
+(`input.*`, `look`, `lookAt`, `dig`, `place`, `chat.send`); perception
+(`screenshot`/`getStats`/`world.query`/`getGuiState`/`inventory`/`players`),
+`events.subscribe` and capabilities are always allowed. Values
+(case-insensitive; anything else falls back to the default plus a note):
+
+| Tier | `input.*`, `dig`, `place` | `look`/`lookAt` |
+|---|---|---|
+| `observe` | denied (`-32012`) | denied (`-32012`) |
+| `input_gui` | allowed ONLY while a GUI screen is open | denied (`-32012`) |
+| `input_world` | allowed ONLY while NO GUI is open | allowed |
+| `full` (default) | allowed | allowed |
+
+(`chat.send` is the deliberate exception: allowed under every tier except
+`observe`, screen state ignored - being GUI-immune is its purpose.)
+
+- **Default `full` preserves M2-A behaviour byte-identically** - tiers are
+  strictly opt-in, and the key is auto-added to existing configs on the next
+  launch.
+- The GUI-open test uses the live `mc.screen` state read on the client main
+  thread *inside* each tool's existing main-thread task (the screen can
+  change any tick; a pre-flight check on the WebSocket thread would race).
+  For `input.key`/`input.text`/`input.mouseMove` under `input_gui` a
+  screen-less keypress would go to the KeyMapping/world - i.e. act outside
+  the GUI - so it is denied; `input.click` already branched on
+  `mc.screen != null` (GUI click vs attack/use).
+- `observe` denies pre-flight (no rate-limit token burned, no main-thread
+  round trip); screen-dependent verdicts deny from inside the task. Denials
+  return error `-32012` (not `-32603`) and write an
+  `INPUT_DENIED reason=permission tier=...` audit line to
+  `logs/sirius_bridge.log`.
+
+## The event push channel (M2-B)
+
+The mod -> brain direction of the protocol: once a client subscribes, the
+bridge pushes `notification` frames the moment something happens in the
+game - the brain no longer has to poll.
+
+```json
+{"type":"notification","event":"chat",
+ "data":{"message":"<Steve> hi","system":false,"sender":"<uuid>","level":"INFO"},
+ "timestamp":1755470400.123,"seq":0}
+```
+
+- **`timestamp`** is epoch **seconds** as a float (matches Python
+  `time.time()`; the Python `NotificationFrame` model requires a float).
+- **`seq`** is per-connection, starts at 0, increments by exactly 1 per
+  delivered frame (the brain warns on non-monotonic seq - our side never
+  skips or repeats for a live connection).
+- **`level`** rides inside `data` by convention (the frozen frame model has
+  no level field); the three levels `CRITICAL`/`WARNING`/`INFO` follow the
+  frozen `EventLevel` enum.
+
+### `events.subscribe({ types, min_level })`
+
+- `types`: REQUIRED array of event name strings (schema violations ->
+  `-32602`); `"*"` or an **empty array** = all events.
+- `min_level`: `"CRITICAL"|"WARNING"|"INFO"` or null (default INFO = no
+  level filtering).
+- Response: `{"subscribed":true,"types":[...],"min_level":"INFO",
+  "note":"unsubscribed clients receive no pushes"}`.
+- **A client that never subscribes receives nothing** - pushes are strictly
+  opt-in per connection. Re-subscribing replaces the previous filter (the
+  seq counter continues, it is per-connection, not per-subscription).
+- Each successful subscribe writes a `SUBSCRIBE` audit line.
+
+### Event catalogue
+
+| Event | Level | Fired when | `data` |
+|---|---|---|---|
+| `chat` | INFO | any chat/system line arrives | `message`, `system` (bool), `sender` (uuid; player lines only) |
+| `gui_open` | WARNING | a screen is about to open (`ScreenEvent.Opening`) | `screen` (class simple name, e.g. `InventoryScreen`) |
+| `gui_close` | WARNING | a screen is replaced or closed (`ScreenEvent.Closing` - fires on screen-to-screen switches too) | `screen` |
+| `death` | CRITICAL | player becomes dead-or-dying (edge-triggered) | `health`, `air`, `on_fire` |
+| `damage` | CRITICAL | actual health decreases (checked every tick; any amount) | `health_before`, `health_after`, `amount`, `damage_type`, `attacker`, `direct_entity` |
+| `fire` | CRITICAL | player catches fire | `health` |
+| `health_low` | CRITICAL | health <= 6.0 | `health`, `threshold` |
+| `drown` | CRITICAL | underwater AND air < 300 | `air` |
+| `screenshot` | INFO | the screenshot stream (below) | `image_b64`, `format`, `width`, `height`, `quality` |
+| `block_update` | INFO | every successful client `LevelChunk.setBlockState` change (protocol 1.11) | `x/y/z`, `dimension`, `before/after` (`block` + complete `state`), `evidence:client_block_change` |
+| `entity_spawn` / `entity_gone` | INFO | client `EntityJoinLevelEvent` / `EntityLeaveLevelEvent` | entity `id/uuid/type/name/position/dimension`; gone adds `dead_or_dying` |
+| `entity_hurt` | WARNING | client living-entity damage handler | entity facts, `health`, `damage_type`, nullable `attacker/direct_entity`, `evidence:client_damage_event` |
+| `entity_death` | WARNING | a living entity leaves the client level while dead-or-dying | entity facts, last captured damage source when available, `evidence:client_entity_leave` |
+| `item_pickup` | INFO | `ClientboundTakeItemEntityPacket` | item/collector entity ids, `amount`, item stack/facts when available, `evidence:server_packet` |
+| `player_join` / `player_leave` | INFO | the corresponding client entity event concerns a Player; local logout also emits leave | player facts; entity or `client_connection_event` evidence, no chat parsing |
+| `window_open` / `window_close` | INFO | an `AbstractContainerScreen` opens/closes; the general GUI events remain separate | `container_id`, `screen`, `evidence:client_screen_event` |
+| `slot_update` | INFO | each entry of a server container set-slot/set-content packet | `container_id`, `state_id`, `packet`, menu `slot` (-1 for carried), `stack`, `evidence:server_packet` |
+| `held_item_changed` | INFO | tick boundary detects selected slot, item/components or count change | `previous_slot/slot`, `before/after`, `evidence:client_tick` |
+| `connection_state` | WARNING | client network LoggingIn/LoggingOut | `state:connected/disconnected`, nullable `player`, `evidence:client_connection_event` |
+| `baritone_state` | INFO | PathEvent or a changed API status snapshot after its initial baseline | the full `baritone.status` shape, `reason:path_event/state_changed`, `evidence:baritone_api` |
+
+**Raw-event boundary (protocol 1.11):** bridge faithfully reports what the client observes. The new events above have no distance filter, business deduplication, cooldown, coalescing or default rate reduction. In particular, every `block_update` is forwarded. Subscriptions are explicit connection-side filters; queueing, backpressure, richer predicates and wake policy belong to the connection/script runtime. A `server_packet` proves the state sent by the server, not that a particular earlier client action succeeded. Initial chunk loads and full container-content packets can therefore be verbose by design.
+
+`damage` pairs the health transition with the fresh `DamageSource` captured by
+`LivingEntityMixin` before vanilla handles the visual hit effect. Vanilla does not
+store that source on the client, so this small client-only capture is required for
+attribution on remote servers. Health and source packets may arrive in either order,
+so unknown attribution waits up to 250 ms for a fresh source; sources older than
+that window are never guessed onto a later hit, and consumed sources are not reused.
+`attacker` and `direct_entity` are nullable `{name,type,uuid}` objects; an
+unavailable source is reported as `damage_type:"unknown"`, never guessed from
+nearby mobs. Absorption-only hits and healing do not emit. The bridge emits
+every observed health decrease without a wake cooldown; consumers can apply
+their own notification policy without losing raw event history.
+
+Danger states are sampled every 20 ticks (~1 s) and are **edge-triggered**
+(one event per false->true transition) with a 5 s per-type cooldown to
+suppress flapping (fire flickering on/off, health oscillating around the
+threshold). While dead, the weaker states (fire/health_low/drown) stay
+silent - `death` is the signal. Leaving a world resets the edges.
+
+### The screenshot stream
+
+A push-based visual feed for subscribers of the `screenshot` event, budgeted
+so a frame never breaks the ~100KB wire ceiling (spec 8.2 pipeline,
+parameters adopted from N.E.K.O's production service):
+
+- **Sampling**: the framebuffer is read ~1 Hz (every 20 ticks), and only
+  while at least one subscriber matches the `screenshot` event - an idle
+  bridge costs nothing.
+- **Throttle**: minimum 6 s between pushes. Frames arriving inside a closed
+  window collapse into a single **latest-wins pending slot**; exactly one
+  delayed flush is armed for the window boundary. The newest frame is
+  therefore never lost, only delayed to the boundary (an immediate push
+  cancels an armed flush so a stale frame can never surface after a fresh
+  one).
+- **Budget ladder**: longest edge 1024 + JPEG q80 first; on overrun,
+  quality descends `[80, 65, 50, 40, 30]` (never above the configured
+  quality) crossed with edge halving `[1024, 512, 256]`. The first
+  combination whose **base64 length** fits 100KB wins; if nothing fits, the
+  smallest attempt ships anyway - a frame is never dropped for size.
+- **Ring buffer**: the last 3 encoded frames are kept (spec); only the
+  latest is consumed (reconnect replay is future work).
+- Payload `data` mirrors the `screenshot` RPC response fields
+  (`image_b64`/`format`/`width`/`height`/`quality`, plus the injected
+  `level`).
+
+### Threading
+
+Event sources fire on the client main/render thread (NeoForge chat/screen
+events, the tick sampler); the screenshot encode and the delayed boundary
+flush run on a daemon thread (`sirius-bridge-events`). Delivery
+(`EventPusher.push`) is fully thread-safe: sessions live in a concurrent
+map, subscriptions are volatile, `seq` is an atomic per-connection counter,
+and socket writes are safe from any thread. The framebuffer read reuses
+`PerceptionTools.grabScreen()` (render thread, pixel download only) - the
+render thread never pays for JPEG encoding.
+
+### Honest drop policy
+
+A push to a connection that died between sampling and sending counts as
+dropped: one `EVENT_DROP` audit line plus a counter, never a silent loss
+and never an exception into the game. Shutdown reports the totals
+(`EVENTS_STOP pushed=.. dropped=..`). Stream frames that fail to encode are
+logged and skipped - the next 1 Hz sample replaces them.
+
+## The GUI state tool (M2-C)
+
+`getGuiState()` takes **no parameters** (any member in `params` answers
+`-32602`) and returns a structural snapshot of the currently open `Screen`
+- the alternative to OCR-ing screenshots: exact widget geometry, text-field
+contents and container-slot item ids, in one request.
+
+- **No screen open**: `{"screen_open": false}` (not an error).
+- **Standard response**:
+
+```json
+{"screen_open": true, "in_game": true, "screen_class": "InventoryScreen",
+ "widgets": [{"type": "Button", "x": 210, "y": 170, "width": 40, "height": 20,
+              "visible": true, "active": true, "message": "Reset Demo"},
+             {"type": "EditBox", "x": 5, "y": 6, "width": 100, "height": 16,
+              "visible": true, "active": true, "text": "hello"}],
+ "slots": [{"index": 0, "container_slot": 0, "x": 154, "y": 28, "role": "result",
+            "item": "minecraft:oak_log", "count": 12},
+           {"index": 9, "container_slot": 9, "x": 30, "y": 40, "role": "player",
+            "item": null, "count": 0}],
+ "truncated": false}
+```
+
+- `widgets` comes from a walk of BOTH widget registries a Screen keeps: the
+  `children()` tree (addWidget / addRenderableWidget) and the public
+  `renderables` list (the only home of `addRenderableOnly` widgets such as
+  render-only labels) - identity-deduplicated, depth-bounded at 12, capped
+  at **512** nodes - beyond that `truncated:true` and enumeration stops, the
+  world.query discipline. Each node carries the class simple name as `type`
+  (anonymous subclasses - vanilla's ChatScreen input is one - fall back to
+  the first named superclass, so it reports `EditBox`), geometry,
+  `visible`/`active` flags, `message` (`getMessage().getString()` -
+  **omitted when empty**) and `text` for text fields (`EditBox.getValue()` -
+  omitted for other widgets). Note the vanilla `InventoryScreen` really has
+  only ~1 widget (the recipe-book toggle) - its structure lives in `slots`.
+- `slots` is present only for container screens
+  (`AbstractContainerScreen`): every `menu.slots` entry with screen position
+  `getGuiLeft()+slot.x / getGuiTop()+slot.y` (slots are 16x16 cells rendered
+  outside the children() widget tree). `index` is the menu list position
+  (`Slot.index`), `container_slot` the slot's index inside its container
+  (`Slot.getContainerSlot()`). `item` is the registry name string or JSON
+  `null` (empty slot / access failure), `count` 0 when empty. There is
+  deliberately no slot cap - vanilla containers stay under ~50 slots and
+  slots are flat, not recursive.
+- **Role semantics** (generic detection, adopted from Numen GuiOps):
+  `crafting` (slot container is a `CraftingContainer`), `result`
+  (`ResultSlot`), `hotbar`/`player` (the player's own inventory - **container
+  slot** 0-8 = hotbar; 9-35 = player), `armor` (container slots 36-39),
+  `offhand` (40), `container` (anything else - chest/furnace/modded). The
+  boundary uses `Slot.getContainerSlot()`, never `Slot.index` -
+  `AbstractContainerMenu.addSlot` overwrites `index` with the menu position,
+  which put the ARMOR slots (menu positions 5-8) in "hotbar" in the first
+  real-machine run. Armor/offhand are separate roles because lumping them
+  into "player" made the first acceptance replay drag crafted planks onto
+  the helmet slot when filtering for "empty player slots" - storage filters
+  should use player/hotbar only. The vanilla E-key inventory therefore
+  reports 1 result + 4 crafting + 9 hotbar + 27 player + 4 armor + 1
+  offhand = **46 slots**.
+- **`in_game`** mirrors the getStats convention: a screen without a world
+  (title/options screens) still reports its widgets, plus `in_game: false`
+  for context.
+- **Fallback tier**: if widget traversal throws (modded screens can be
+  creative), the response degrades instead of erroring -
+  `{"screen_open": true, "fallback": true, "screen_class": ..., "rects":
+  [...whatever geometry was collected before the failure...], "note":
+  "<failure>"}`; a broken slot likewise degrades alone to `item: null` plus a
+  per-slot `note`. getGuiState never surfaces `-32603` for screen content.
+- **Coordinate basis**: all x/y are **GUI-scaled** - the same space as the
+  `gui_scaled` object `input.mouseMove` *returns*, NOT the window pixels
+  mouseMove *takes*. To click a slot at gui (gx, gy): derive the scale from
+  any mouseMove response (`delivered px / gui_scaled` of one probe), convert
+  `gx * screenWidth / guiScaledWidth`, then mouseMove + click. On the
+  standard test client the scale is a small integer (GUI scale 2-4).
+- Known limits: modded screens with fully custom rendering may yield few or
+  zero widgets (they draw directly); widgets that are plain fields rendered
+  manually - e.g. container-screen title labels drawn with `Font` in
+  `render()` - live in neither `children()` nor `renderables` and are
+  unreachable; slots are reliable for vanilla-style containers; `message`
+  only carries plain text (no styling metadata); the response is a snapshot -
+  the screen may change between call and click.
+
+## Build
+
+```bash
+gradlew build
+```
+
+The built jar lands in `build/libs/` with `Java-WebSocket-1.5.7.jar` embedded
+under `META-INF/jarjar/` (loaded by NeoForge in production). Dev runs
+(`gradlew runClient`) get the library via the `clientAdditionalRuntimeClasspath`
+configuration instead.
+
+`build` also runs the **smoke test** (`gradlew smokeTest`, wired into
+`check`): an in-process `main()` that exercises the pure halves of the
+perception, input, event-push, GUI state, look and dig code - parameter
+validation, bbox cropping, both JPEG budget ladders, response assembly,
+block scan and entity filtering (including the T6 dense-scene/range-
+containment truncation regressions), the key-name table, the rate-limiter
+token bucket, evidence file naming, the config parser (incl.
+`keep_running_unfocused` and `permission` defaults/round-trips),
+subscription matching, notification frame assembly, the stream throttle
+state machine (injected clock), the streaming ladder, widget/slot node
+assembly, the 512-node cap, slot role classification, all three getGuiState
+response shapes, the look rotation math (hand-computed cases against the
+vanilla formula), the smooth-turn step/convergence math, the permission-tier
+decision matrix, the dig monitor state machine (aim -> press -> break,
+occluder tolerance + `broken_via_occluder`, telemetry early-stop, aim-stall
+guard, insta-mine short press/retries, timeout) and the dig parameter/
+result shapes - plus the M4.4 v1.4 additions: place parameter validation and
+item normalization, the support/hit-point geometry (hand-computed cases for
+four of the six faces, plus the all-faces `aimPoint` identity), the place
+result vocabulary and response shapes, the inventory scope/filter rules, the
+slot-role boundaries, the emptiness/counts/matching assembly, and the players
+no-parameter discipline with its self-first ordering - with no game launched
+(696 checks; a 4K incompressible-noise image verifies the 2MB RPC degrade, an
+800x600 one the 100KB stream ladder).
+
+## Deploy to test client
+
+```bash
+deploy.cmd
+```
+
+Runs `gradlew build` (including the local schema sync), then copies
+`build/libs/sirius_bridge-*.jar` (excluding `-sources`/`-javadoc`) and the matching
+`baritone-api-neoforge-1.11.2.jar` into the target mods directory. Older bridge jars
+and incompatible `baritone-standalone-*.jar` files are removed first. The default
+target is `..\Sirius-Minecraft\.minecraft\versions\1.21.1-Sirius\mods\`; set
+`SIRIUS_MODS_DIR` before running to deploy elsewhere. Safe to re-run (idempotent).
+The Gradle invocation includes local proxy flags (`localhost:9674`) - remove them
+if the machine has direct internet access.
+
+## Development
+
+- `gradlew runClient` - launch a dev Minecraft client with the mod loaded
+- `gradlew runServer` - launch a dev server (mod is client-only, does nothing there)
+- `gradlew runData` - data generation
+
+## Project layout
+
+```
+src/main/java/io/sirius/bridge/
+    SiriusBridge.java     mod entry: lifecycle wiring (start on first tick, stop on shutdown)
+    BridgeServer.java     WebSocket server: hello/token handshake, frame dispatch, audit
+    BridgeConfig.java     config/sirius_bridge.toml (port + token, generates token on first run)
+    AuditLog.java         logs/sirius_bridge.log (one line per security/protocol event)
+    Capabilities.java     capability list assembled from the frozen schema resources
+    ToolRegistry.java     method -> handler registry (add tools here, dispatcher untouched)
+    ToolContext.java      per-call context: main-thread marshalling + thread-safe send
+    PerceptionTools.java  M1-C shells: framebuffer grab, player/level reads (main thread)
+    BlockContracts.java   pure: block.get params, load-state and property response shapes
+    BlockTools.java       protocol-1.10 single-block reads with real chunk/build-bound checks
+    ContainerContracts.java  pure: container params, slot diffs, evidence/result shapes
+    ContainerTools.java   protocol-1.10 real menu click, transfer and close actions
+    InputTools.java       M2-A shells: event-callback injection, GUI click evidence (main thread)
+    EventPusher.java      M2-B shell: notification emit choke point (chat/gui/danger/screenshot stream)
+    CoreEventContracts.java pure: protocol-1.11 raw event shapes, levels and held-item change decisions
+    CoreEventSources.java protocol-1.11 NeoForge/packet/block/entity/held-item/Baritone raw sources
+    mixin/               client-only block, damage, slot and item-pickup capture hooks
+    GuiTools.java         M2-C shell: screen widget tree + container slot reads (main thread)
+    LookTools.java        M2-D shells: absolute view rotation via the vanilla lookAt statement sequence
+    TurnController.java   M3.5 v1.2: tick-driven fixed-angular-speed smooth turns (one active turn, supersede-on-new-look)
+    DigContracts.java     pure: dig param validation, the DigMonitor state machine, result shapes
+    DigTools.java         M3.5 v1.2 shell: smart dig (pre-checks, smooth aim, action-layer monitored hold)
+    PlaceContracts.java   pure: M4.4 place params, support/hit-point geometry, result vocabulary/shapes
+    PlaceTools.java       M4.4 v1.4 shell: aim -> hand switch (one tick) -> useItemOn -> watch the cell
+    InventoryContracts.java  pure: M4.4 inventory scope/filter, roles, emptiness/counts assembly
+    InventoryTools.java   M4.4 v1.4 shell: reads Inventory slots 0-40 + item-tag membership
+    PlayersContracts.java pure: M4.4 players no-param discipline, self-first ordering, shape
+    PlayersTools.java     M4.4 v1.4 shell: ClientPacketListener.getOnlinePlayers() snapshot
+    InputGuard.java       shared guard rails: input_enabled + rate limit + evidence flag + permission tier
+    ToolContracts.java    pure: param validation + response assembly + world scan logic
+    InputContracts.java   pure: input param validation + result assembly + evidence naming
+    GuiContracts.java     pure: GUI state node/slot assembly, cap + truncation, response shapes
+    EventsContracts.java  pure: event levels, subscription matching, notification shape, stream throttle
+    LookContracts.java    pure: look/lookAt validation, vanilla rotation math, response shapes
+    PermissionContracts.java  pure: M2-D permission tier matrix (tier x screen-state x action)
+    KeyCodes.java         pure: logical key names -> GLFW keycodes (1.21.1 InputConstants values)
+    TokenBucket.java      pure: input rate limiter (clock injectable for the smoke test)
+    ImageOps.java         pure: crop / JPEG encode / size-budget ladder / base64
+    Json.java             wire-frame builders + JSON-RPC style error codes
+src/test/java/io/sirius/bridge/SmokeMain.java   in-process smoke test (gradlew smokeTest)
+src/main/templates/META-INF/      neoforge.mods.toml template (properties expanded at build time)
+build.gradle                      jarJar dependency + schema sync + smokeTest task
+src/main/resources/assets/sirius_bridge/   Asset placeholder
+```
+
+## Next steps (per §8.2 of the technical spec)
+
+- M3+: `events.watch` (stat/condition watches with hysteresis + cooldown) remains
+  unimplemented and is not advertised by `capabilities/list`; its draft schema is
+  retained only as a design artifact.
+- Natural M2-B extensions: more event sources just call
+  `EventPusher.push` (one method, thread-safe); a reconnect replay could
+  consume the stream ring buffer; the danger catalogue (hunger, weather)
+  can grow with more event sources.
+- Security model so far: M1 loopback binding + token handshake, M2-A the
+  input rate limiter/master switch/per-input audit, M2-B the strictly
+  opt-in push channel, M2-D the permission tiers (`observe` is the
+  read-only mode). A future token-scoped tier could reuse
+  `PermissionContracts` per connection instead of per config.

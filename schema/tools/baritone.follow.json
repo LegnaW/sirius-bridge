@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "BaritoneFollowParams",
+  "description": "通过 Baritone FollowProcess API 跟随一个可见玩家。uuid 与 name 必须二选一；name 使用不区分大小写的精确匹配，不提供跟随所有玩家的入口。follow_radius 为跟随目标半径，默认 10 格。",
+  "type": "object",
+  "properties": {
+    "uuid": { "type": "string", "description": "目标玩家 UUID，优先且最稳定" },
+    "name": { "type": "string", "description": "目标玩家名，精确匹配（不区分大小写）" },
+    "follow_radius": { "type": "integer", "minimum": 1, "maximum": 64, "default": 10 },
+    "allow_break": { "type": "boolean", "default": false },
+    "allow_place": { "type": "boolean", "default": false }
+  },
+  "additionalProperties": false
+}

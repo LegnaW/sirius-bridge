@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "BaritoneStopParams",
+  "description": "直接调用 PathingBehavior.cancelEverything，停止当前 Baritone 动作。",
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}

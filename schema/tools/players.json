@@ -1,0 +1,7 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "players()。M4.4 v1.4 在线玩家名单（感知，恒放行）。\n\n无参数：与 getGuiState/getStats 同纪律——请求里出现任何成员即 ``-32602``\n（参数契约冻结才有确定性，Java 侧按 nil 参数校验）。用于回答\"谁在服里\"，\n并把 chat 事件里的 sender uuid 对上名字（world.query 只看得到视野内实体）。",
+  "properties": {},
+  "title": "PlayersParams",
+  "type": "object"
+}
