@@ -1,5 +1,7 @@
 # Sirius Bridge · 天狼星之桥
 
+<img src="docs/sirius-portrait.jpg" alt="Sirius Bridge portrait" width="420">
+
 > ……致化作光明的你，<br>
 > 在能够相会于宇宙之前还请等等，<br>
 > 化作光明的你的那颗心脏，<br>
