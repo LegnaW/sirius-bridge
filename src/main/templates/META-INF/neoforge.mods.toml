@@ -26,3 +26,11 @@ type = "required"
 versionRange = "${minecraft_version_range}"
 ordering = "NONE"
 side = "BOTH"
+
+[[dependencies.${mod_id}]]
+# Upstream Baritone NeoForge 1.11.2 declares this mod ID.
+modId = "baritoe"
+type = "required"
+versionRange = "[1.11.2,)"
+ordering = "AFTER"
+side = "CLIENT"

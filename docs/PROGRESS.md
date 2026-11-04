@@ -14,6 +14,8 @@
 
 ## 当前验证与部署
 
+- v0.1.0 修复 NeoForge 前置声明：客户端必需 `baritoe`（Baritone API 1.11.2+），Bridge 在其后加载。Gradle 构建及 747 项 smoke 通过，已核对 jar 内元数据。加载器真机待验。
+
 - 本次 `inventory.drop`：`./gradlew.bat build` 成功，**747 passed / 0 failed**，能力目录 33/33 且注册一致。协议 1.12 jar 已部署，用户已完成 DSH/客户端真机测试。
 - 公开发布：当前快照已完成本机路径与身份信息脱敏；远程 `main` 已由无旧父提交的新历史覆盖，远程没有其它分支或标签引用旧历史。
 - 本次 `movement_look` 触发范围修复：`./gradlew.bat build` 成功，**735 passed / 0 failed**；新回归覆盖配置与 Baritone 导航双重门槛。新 jar 已部署，源/目标 SHA-256 均为 `415fc9260e4e505f6945554b16e47ea8a90b247788634676a18961c86046a3d1`，旧 jar 备份在 `build/runtime-backup/20261103-224946/`；用户已确认真机行走不再被抢占。
