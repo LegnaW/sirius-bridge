@@ -70,7 +70,7 @@ public final class DigContracts {
     public static final double DROPS_SCAN_RADIUS = 4.0;
 
     /** Validated {@code dig} params: integer block position + optional timeout_ms. */
-    public record DigParams(int x, int y, int z, int timeoutMs) {
+    public record DigParams(int x, int y, int z, int timeoutMs, String expectedBlock) {
     }
 
     /**
@@ -80,11 +80,16 @@ public final class DigContracts {
      * (default 15000).
      */
     public static DigParams digParams(JsonObject params) throws ToolContracts.InvalidParams {
+        JsonElement expected = params.get("expected_block");
+        if (expected != null && (!expected.isJsonPrimitive() || !expected.getAsJsonPrimitive().isString()
+                || !expected.getAsString().matches("[a-z0-9_.-]+:[a-z0-9_./-]+"))) {
+            throw new ToolContracts.InvalidParams("dig expected_block must be a namespaced block ID");
+        }
         return new DigParams(
                 blockCoord(params, "x"),
                 blockCoord(params, "y"),
                 blockCoord(params, "z"),
-                timeoutMs(params));
+                timeoutMs(params), expected == null ? null : expected.getAsString());
     }
 
     private static int blockCoord(JsonObject params, String member) throws ToolContracts.InvalidParams {

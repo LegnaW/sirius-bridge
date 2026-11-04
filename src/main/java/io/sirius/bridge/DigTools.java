@@ -154,7 +154,7 @@ final class DigTools {
                         DigContracts.digResult(DigContracts.RESULT_ALREADY_AIR, null,
                                 System.currentTimeMillis() - startedMs, null, null),
                         null);
-            case BLOCKED_LIQUID, BLOCKED_FALLING:
+            case BLOCKED_LIQUID, BLOCKED_FALLING, "target_changed", "blocked_sight", "wrong_tool", "unsafe_support":
                 return finish(ctx, "dig", summary,
                         DigContracts.digResult(start.kind(), start.blockName(),
                                 System.currentTimeMillis() - startedMs, null, start.reason()),
@@ -306,8 +306,24 @@ final class DigTools {
             return StartOutcome.of(ALREADY_AIR); // idempotent success, nothing to do
         }
 
+        if (p.expectedBlock() != null) {
+            if (!p.expectedBlock().equals(blockName)) {
+                return new StartOutcome("target_changed", null, blockName, null, false, null);
+            }
+            if (unsafeSupport(level, player, target)) {
+                return new StartOutcome("unsafe_support", null, blockName, null, false, null);
+            }
+            if (!player.hasCorrectToolForDrops(state)) {
+                return new StartOutcome("wrong_tool", null, blockName, null, false, null);
+            }
+            if (!hasTargetSight(level, player, target)) {
+                return new StartOutcome("blocked_sight", null, blockName, null, false, null);
+            }
+        }
+
         // Safe-to-break minimal set (ported from Numen-style rules):
-        String blocked = liquidNeighbor(level, target);
+        String blocked = p.expectedBlock() != null && dangerousFluid(state.getFluidState())
+                ? "target contains dangerous fluid" : liquidNeighbor(level, target, p.expectedBlock() != null);
         if (blocked != null) {
             return new StartOutcome(BLOCKED_LIQUID, null, blockName, blocked, false, null);
         }
@@ -324,7 +340,7 @@ final class DigTools {
         // Smooth aim at the block center (300 deg/s); supersedes any active turn.
         double[] rotation = LookContracts.rotationTowards(
                 eye.x, eye.y, eye.z, center.x, center.y, center.z);
-        ActiveDig dig = installMonitor(target, blockName, p.timeoutMs(), instaMine, dropsSeenBefore);
+        ActiveDig dig = installMonitor(target, blockName, p.timeoutMs(), instaMine, dropsSeenBefore, p.expectedBlock() != null);
         dig.turn = TurnController.begin(rotation[0], rotation[1], DigContracts.DIG_AIM_TURN_SPEED_DEG_S);
         return new StartOutcome(STARTED, null, blockName, null, instaMine, dig);
     }
@@ -346,12 +362,38 @@ final class DigTools {
         return seen;
     }
 
-    /** First liquid-holding neighbour of the target, or null ("water at (x,y,z)"). */
-    private static String liquidNeighbor(ClientLevel level, BlockPos target) {
+    private static boolean unsafeSupport(ClientLevel level, LocalPlayer player, BlockPos target) {
+        if (!target.equals(player.getBlockPosBelowThatAffectsMyMovement())) {
+            return false;
+        }
+        for (int down = 1; down <= 3; down++) {
+            BlockPos landing = target.below(down);
+            if (!level.hasChunkAt(landing) || landing.getY() < level.getMinBuildHeight()) {
+                return true;
+            }
+            BlockState state = level.getBlockState(landing);
+            double surface = BlockTools.supportHeight(level, landing, state,
+                    player.getX() - landing.getX(), player.getZ() - landing.getZ());
+            if (surface > 0) {
+                return player.getY() - (landing.getY() + surface) > 3;
+            }
+            if (!BlockTools.passable(level, landing, state)) {
+                return true;
+            }
+        }
+        return true;
+    }
+
+    private static boolean dangerousFluid(net.minecraft.world.level.material.FluidState fluid) {
+        return !fluid.isEmpty() && !fluid.is(net.minecraft.tags.FluidTags.WATER);
+    }
+
+    /** First liquid neighbour blocked under the requested dig policy. */
+    private static String liquidNeighbor(ClientLevel level, BlockPos target, boolean allowWater) {
         for (Direction direction : Direction.values()) {
             BlockPos neighbor = target.relative(direction);
             var fluid = level.getFluidState(neighbor);
-            if (!fluid.isEmpty()) {
+            if (allowWater ? dangerousFluid(fluid) : !fluid.isEmpty()) {
                 var fluidId = BuiltInRegistries.FLUID.getKey(fluid.getType());
                 return "liquid " + (fluidId != null ? fluidId : "unknown") + " at neighbor "
                         + neighbor.toShortString()
@@ -385,6 +427,7 @@ final class DigTools {
         final BlockPos target;
         final String blockId;
         final long startedMs;
+        final boolean strictTarget;
         /** M3.6: item-entity uuids near the target BEFORE the dig (drop diff base). */
         final java.util.Set<String> dropsSeenBefore;
         final CountDownLatch done = new CountDownLatch(1);
@@ -395,7 +438,8 @@ final class DigTools {
         volatile String note;
 
         ActiveDig(DigContracts.DigMonitor monitor, BlockPos target, String blockId, long startedMs,
-                  java.util.Set<String> dropsSeenBefore) {
+                  java.util.Set<String> dropsSeenBefore, boolean strictTarget) {
+            this.strictTarget = strictTarget;
             this.monitor = monitor;
             this.target = target;
             this.blockId = blockId;
@@ -422,14 +466,14 @@ final class DigTools {
      * superseding (and stopping) any active one. Main thread only.
      */
     private static ActiveDig installMonitor(BlockPos target, String blockId, int timeoutMs,
-                                            boolean instaMine, java.util.Set<String> dropsSeenBefore) {
+                                            boolean instaMine, java.util.Set<String> dropsSeenBefore, boolean strictTarget) {
         if (active != null) {
             release(Minecraft.getInstance());
             active.complete(DigContracts.RESULT_NOT_DIGGING, active.monitor.sawOccluder(), "superseded by another dig");
             active = null;
         }
         ActiveDig dig = new ActiveDig(new DigContracts.DigMonitor(timeoutMs, instaMine), target, blockId,
-                System.currentTimeMillis(), dropsSeenBefore);
+                System.currentTimeMillis(), dropsSeenBefore, strictTarget);
         active = dig;
         return dig;
     }
@@ -475,6 +519,14 @@ final class DigTools {
 
         BlockState state = level.getBlockState(dig.target);
         boolean targetGone = state.isAir() || !dig.blockId.equals(blockId(state));
+        if (dig.strictTarget && (!level.hasChunkAt(dig.target) || !targetGone
+                && (unsafeSupport(level, player, dig.target)
+                || !player.hasCorrectToolForDrops(state) || !hasTargetSight(level, player, dig.target)
+                || dangerousFluid(state.getFluidState()) || liquidNeighbor(level, dig.target, true) != null || fallingAbove(level, dig.target) != null
+                || player.getEyePosition().distanceTo(Vec3.atCenterOf(dig.target)) > DigContracts.REACH))) {
+            abortActive("strict dig target is no longer safe or reachable");
+            return;
+        }
         double[] want = aimRotation(player, dig.target);
         boolean aimed = Math.abs(LookContracts.yawDelta(player.getYRot(), want[0])) < 2.0
                 && Math.abs(player.getXRot() - want[1]) < 2.0;
@@ -489,7 +541,7 @@ final class DigTools {
                 dig.turn = TurnController.begin(want[0], want[1], DigContracts.DIG_AIM_TURN_SPEED_DEG_S);
             }
         }
-        boolean hitOnOccluder = mc.hitResult instanceof BlockHitResult hit
+        boolean hitOnOccluder = !dig.strictTarget && mc.hitResult instanceof BlockHitResult hit
                 && !hit.getBlockPos().equals(dig.target);
         boolean stageActive = mc.gameMode != null && mc.gameMode.getDestroyStage() >= 0;
 
@@ -511,6 +563,13 @@ final class DigTools {
         }
     }
 
+    private static boolean hasTargetSight(ClientLevel level, LocalPlayer player, BlockPos target) {
+        var hit = level.clip(new net.minecraft.world.level.ClipContext(player.getEyePosition(),
+                Vec3.atCenterOf(target), net.minecraft.world.level.ClipContext.Block.OUTLINE,
+                net.minecraft.world.level.ClipContext.Fluid.NONE, player));
+        return hit.getType() == net.minecraft.world.phys.HitResult.Type.BLOCK && hit.getBlockPos().equals(target);
+    }
+
     // ------------------------------------------------------------------ action-layer hold
 
     /**
@@ -521,7 +580,7 @@ final class DigTools {
      * eye->center is the same answer without needing a live raycast).
      */
     private static BlockHitResult currentHit(Minecraft mc, ActiveDig dig) {
-        if (mc.hitResult instanceof BlockHitResult hit
+        if (!dig.strictTarget && mc.hitResult instanceof BlockHitResult hit
                 && !mc.level.getBlockState(hit.getBlockPos()).isAir()) {
             return hit;
         }

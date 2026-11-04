@@ -2,7 +2,7 @@
 
 NeoForge mod running on the **real Minecraft client**, acting as the "eyes and hands" of the Sirius AI brain: screenshot capture, structured perception, input and action primitives, and event push. This is the standalone development repository for the bridge; its protocol schemas and build do not depend on a sibling checkout.
 
-> Current status: **protocol 1.13**, with 33 advertised tools covering perception,
+> Current status: **protocol 1.15**, with 33 advertised tools covering perception,
 > single-block state, real container transactions, GUI and inventory state, input,
 > block/entity actions, events, client chat, and direct Baritone API control. The
 > schemas checked into `schema/` are the contract served by `capabilities/list`
@@ -89,7 +89,7 @@ When the client reaches the title screen, the mod starts a WebSocket server:
 - **Capabilities**: `capabilities/list` returns the frozen capabilities
   (name/version/input_schema) assembled from the schema JSON files copied into
   the jar at build time from `schema` (single source of truth;
-  see "Schema sync" below). Protocol version: `"1.13"`. The server rejects startup
+  see "Schema sync" below). Protocol version: `"1.15"`. The server rejects startup
   if an advertised tool has no registered handler or a registered tool other than
   the built-in `capabilities/list` method is not advertised.
 
@@ -257,7 +257,7 @@ are required integers within ±30,000,000. Outside a world it returns the shared
 
 - `status:"ok"`: the chunk is loaded. `block` is the real registry id, including
   `minecraft:air` and other air variants; `state` contains every block-state
-  property serialized to a string.
+  property serialized to a string. Protocol 1.14 adds air, breakable and safe_support. Protocol 1.15 adds passable and support_height, and accepts dry partial collision surfaces as support.
 - `status:"unloaded"`: the position is inside the build bounds but its chunk is
   unavailable. `loaded:false`, `block:null`, `state:{}`. It is never converted to
   air.
@@ -649,6 +649,8 @@ Pipeline (per call, game access on the client main thread):
 `result` vocabulary the brain maps to teaching phrases: `broken` /
 `already_air` / `timeout` / `not_digging` / `blocked_liquid` /
 `blocked_falling`.
+
+Protocol 1.14 adds optional expected_block (namespaced registry ID) to dig. This mode requires a visible matching target and never breaks an occluder. Results include target_changed, blocked_sight, wrong_tool and unsafe_support. Protocol 1.15 strict dig permits ordinary water nearby and requires a known dry landing within a three-block fall before removing current support. Look and getStats report yaw in [-180, 180).
 
 ## The place tool (M4.4 v1.4)
 

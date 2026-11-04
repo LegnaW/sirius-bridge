@@ -5,6 +5,8 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.FallingBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.EmptyLevelChunk;
 
@@ -49,7 +51,40 @@ final class BlockTools {
         Map<String, String> properties = new LinkedHashMap<>();
         blockState.getValues().forEach((property, value) ->
                 properties.put(property.getName(), String.valueOf(value)));
-        return BlockContracts.result("ok", p.x(), p.y(), p.z(), minY, maxY,
+        JsonObject result = BlockContracts.result("ok", p.x(), p.y(), p.z(), minY, maxY,
                 id != null ? id.toString() : "unknown", properties);
+        boolean dry = blockState.getFluidState().isEmpty();
+        result.addProperty("air", blockState.isAir() && dry);
+        result.addProperty("breakable", blockState.getDestroySpeed(level, pos) >= 0 && dry);
+        result.addProperty("passable", passable(level, pos, blockState));
+        double height = supportHeight(level, pos, blockState);
+        result.addProperty("safe_support", height > 0);
+        result.addProperty("support_height", height);
+        return result;
+    }
+
+    static boolean passable(ClientLevel level, BlockPos pos, BlockState state) {
+        return state.getFluidState().isEmpty() && !hazardous(state) && state.getCollisionShape(level, pos).isEmpty();
+    }
+
+    static double supportHeight(ClientLevel level, BlockPos pos, BlockState state) {
+        return supportHeight(level, pos, state, 0.5, 0.5);
+    }
+
+    static double supportHeight(ClientLevel level, BlockPos pos, BlockState state, double x, double z) {
+        if (!state.getFluidState().isEmpty() || hazardous(state) || state.getBlock() instanceof FallingBlock) {
+            return 0;
+        }
+        double height = state.getCollisionShape(level, pos).toAabbs().stream()
+                .filter(box -> box.minX <= x && box.maxX >= x && box.minZ <= z && box.maxZ >= z)
+                .mapToDouble(box -> box.maxY).max().orElse(0);
+        return height <= 1 ? height : 0;
+    }
+
+    private static boolean hazardous(BlockState state) {
+        return state.is(Blocks.MAGMA_BLOCK) || state.is(Blocks.CACTUS) || state.is(Blocks.POWDER_SNOW)
+                || state.is(Blocks.FIRE) || state.is(Blocks.SOUL_FIRE) || state.is(Blocks.CAMPFIRE)
+                || state.is(Blocks.SOUL_CAMPFIRE) || state.is(Blocks.SWEET_BERRY_BUSH)
+                || state.is(Blocks.WITHER_ROSE) || state.is(Blocks.POINTED_DRIPSTONE);
     }
 }

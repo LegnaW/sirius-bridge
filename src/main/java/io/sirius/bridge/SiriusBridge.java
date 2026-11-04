@@ -68,8 +68,11 @@ public class SiriusBridge {
         // early return, riding this same listener. The M4.1 movement-look
         // pump rides along only during Baritone navigation and yields to any
         // active explicit turn.
+        boolean explicitTurnThisTick = TurnController.activeTurn() != null;
         TurnController.onClientTick();
-        MovementLook.onClientTick(movementLook, BaritoneTools.isNavigating());
+        if (!explicitTurnThisTick) {
+            MovementLook.onClientTick(movementLook, BaritoneTools.isNavigating());
+        }
         DigTools.onClientTick();
         // M4.4 v1.4: the place monitor rides the same pump (aim -> hand switch ->
         // one tick of settling -> use -> watch the cell); a no-op when idle.

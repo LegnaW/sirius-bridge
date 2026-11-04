@@ -391,7 +391,7 @@ public final class ToolContracts {
         result.addProperty("game_mode", s.gameMode());
         result.add("effects", effects);
         result.addProperty("alive", s.alive());
-        result.addProperty("yaw", s.yaw());
+        result.addProperty("yaw", LookContracts.wrapDegrees(s.yaw()));
         result.addProperty("pitch", s.pitch());
         // v1.6 environment facts (purely additive: older brains ignore them).
         result.addProperty("window_focused", s.windowFocused());

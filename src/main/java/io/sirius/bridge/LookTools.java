@@ -170,7 +170,7 @@ final class LookTools {
      * reuses it for its per-tick smooth-turn writes.
      */
     static void applyRotation(LocalPlayer player, double yaw, double pitch) {
-        player.setYRot((float) yaw);
+        player.setYRot((float) (player.getYRot() + LookContracts.yawDelta(player.getYRot(), yaw)));
         player.setXRot((float) pitch);
         player.yRotO = player.getYRot();
         player.xRotO = player.getXRot();

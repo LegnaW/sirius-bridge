@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "description": "block.get({x,y,z})。协议 1.10 的单格读取原语。返回 registry id、完整方块状态和 ok/unloaded/out_of_world；真实空气与未加载不再混为一谈。max_y 为包含在内的建筑上界。",
+  "description": "block.get({x,y,z})。协议 1.10 的单格读取原语。返回 registry id、完整方块状态和 ok/unloaded/out_of_world；真实空气与未加载不再混为一谈。max_y 为包含在内的建筑上界。1.14 为已加载的方块返回 air、breakable、safe_support；1.15 增加 passable 和 support_height。",
   "properties": {
     "x": {
       "maximum": 30000000,

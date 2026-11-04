@@ -1475,6 +1475,14 @@ public final class SmokeMain {
                 "look math: wrapDegrees matches vanilla (180 wraps to -180, [-180, 180) reduction)");
 
         // --- result shapes
+        JsonObject wrappedLook = LookContracts.lookResult(-1720.28, 0, 534, 0);
+        check(Math.abs(wrappedLook.getAsJsonObject("previous").get("yaw").getAsDouble() - 79.72) < 0.001
+                        && wrappedLook.get("yaw").getAsDouble() == 174
+                        && 530 + LookContracts.yawDelta(530, 174) == 534,
+                "look: report normalized yaw while keeping an equivalent continuous landing");
+        check("minecraft:iron_ore".equals(validParams(() -> DigContracts.digParams(
+                        json("{\"x\":0,\"y\":64,\"z\":0,\"expected_block\":\"minecraft:iron_ore\"}"))).expectedBlock()),
+                "dig: strict target accepts namespaced block ID");
         JsonObject look = LookContracts.lookResult(10, -5, -90, 30);
         check(look.get("in_game").getAsBoolean() && look.get("looked").getAsBoolean()
                         && look.get("yaw").getAsDouble() == -90.0 && look.get("pitch").getAsDouble() == 30.0

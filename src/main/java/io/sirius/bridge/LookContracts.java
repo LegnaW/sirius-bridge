@@ -215,13 +215,13 @@ public final class LookContracts {
     public static JsonObject lookResult(double previousYaw, double previousPitch,
                                         double yaw, double pitch) {
         JsonObject previous = new JsonObject();
-        previous.addProperty("yaw", previousYaw);
+        previous.addProperty("yaw", wrapDegrees(previousYaw));
         previous.addProperty("pitch", previousPitch);
 
         JsonObject result = new JsonObject();
         result.addProperty("in_game", true);
         result.addProperty("looked", true);
-        result.addProperty("yaw", yaw);
+        result.addProperty("yaw", wrapDegrees(yaw));
         result.addProperty("pitch", pitch);
         result.add("previous", previous);
         return result;
@@ -239,7 +239,7 @@ public final class LookContracts {
         result.addProperty("in_game", true);
         result.addProperty("looked", true);
         result.add("target", target);
-        result.addProperty("yaw", yaw);
+        result.addProperty("yaw", wrapDegrees(yaw));
         result.addProperty("pitch", pitch);
         result.addProperty("distance", distance);
         return result;
