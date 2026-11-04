@@ -2,7 +2,9 @@
 
 最后更新：2026-11-04
 
-## 当前状态：协议 1.12，动作层物品丢弃已接入
+## 当前状态：协议 1.13
+
+- input.click 支持指定 GUI 坐标，直接向当前 Screen 派发点击，目标是真机失焦可用。
 
 - v2 两大板块为“完善接口底层 → 编写自带插件”。协议 1.10 的 block.get 与真实容器事务保持通过；1.11 新增 14 类核心事件；1.12 新增 `inventory.drop`，RPC 工具共 **33 个**。
 - `inventory.drop {slot,count?}` 通过原版 `ClickType.THROW` 丢弃指定 0..40 背包槽位物品，count 省略为整组；补齐盔甲 36..39→菜单 5..8、副手 40→菜单 45 映射。按客户端槽位回读返回 dropped/partial/unknown，不注入 Q。用户已完成真机测试，规格见 `docs/sessions/2026-11-03-inventory-drop.md`。

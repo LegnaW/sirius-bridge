@@ -6,6 +6,8 @@ import com.mojang.blaze3d.platform.Window;
 import net.minecraft.client.KeyboardHandler;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.MouseHandler;
+import net.minecraft.client.gui.screens.Screen;
+import net.neoforged.neoforge.client.ClientHooks;
 import net.neoforged.fml.loading.FMLPaths;
 import org.lwjgl.glfw.GLFW;
 
@@ -320,7 +322,7 @@ final class InputTools {
             return Json.errorResponse(ctx.id(), Json.RATE_LIMITED,
                     InputContracts.rateLimitedMessage(guard.limitPerSecond()), null);
         }
-        if (ON_MOUSE_PRESS == null) {
+        if (p.at() == null && ON_MOUSE_PRESS == null) {
             return Json.errorResponse(ctx.id(), Json.INTERNAL_ERROR,
                     "MouseHandler.onPress is not reachable on this client", null);
         }
@@ -337,7 +339,15 @@ final class InputTools {
             if (!PermissionContracts.allows(guard.tier(), screenOpen, PermissionContracts.Action.INPUT)) {
                 return new PermissionDeniedMarker(screenOpen);
             }
-            long window = mc.getWindow().getWindow();
+            Screen target = mc.screen;
+            if (p.at() != null) {
+                if (target == null || mc.getOverlay() != null) {
+                    return new ToolContracts.InvalidParams("input.click at requires an open GUI without an overlay");
+                }
+                if (!p.at().inside(target.width, target.height)) {
+                    return new ToolContracts.InvalidParams("input.click at is outside the current GUI");
+                }
+            }
             BufferedImage shot = null;
             String screenName = null;
             if (screenOpen) {
@@ -346,11 +356,19 @@ final class InputTools {
                     shot = PerceptionTools.grabScreen(); // render thread: pixel download only
                 }
             }
-            dispatch(ON_MOUSE_PRESS, mc.mouseHandler, window, p.button(), InputConstants.PRESS, 0);
-            return new ClickStart(shot, screenName);
+            if (p.at() == null) {
+                dispatch(ON_MOUSE_PRESS, mc.mouseHandler, mc.getWindow().getWindow(),
+                        p.button(), InputConstants.PRESS, 0);
+            } else {
+                dispatchScreenClick(target, p.at(), p.button(), InputConstants.PRESS);
+            }
+            return new ClickStart(shot, screenName, target);
         });
         if (outcome instanceof PermissionDeniedMarker denied) {
             return permissionDenied(ctx, guard, "input.click", "btn" + p.button(), denied.screenOpen());
+        }
+        if (outcome instanceof ToolContracts.InvalidParams invalid) {
+            return invalidParams(ctx, invalid);
         }
         final ClickStart start = (ClickStart) outcome;
 
@@ -364,7 +382,7 @@ final class InputTools {
         // verify the timing without a client.
         for (InputContracts.ScheduledClick event : InputContracts.clickSchedule(p)) {
             int action = event.press() ? InputConstants.PRESS : InputConstants.RELEASE;
-            SCHEDULER.schedule(() -> submitMouse(p.button(), action), event.delayMs(), TimeUnit.MILLISECONDS);
+            SCHEDULER.schedule(() -> submitMouse(p, action, start.target()), event.delayMs(), TimeUnit.MILLISECONDS);
         }
 
         ctx.audit("INPUT", summary("input.click", "btn" + p.button()) + " count=" + p.count()
@@ -377,13 +395,39 @@ final class InputTools {
                 evidence.file(), evidence.bytes(), p.holdMs()));
     }
 
+    private static void dispatchScreenClick(Screen screen, InputContracts.GuiPoint at, int button, int action) {
+        double x = at.x();
+        double y = at.y();
+        if (action == InputConstants.PRESS) {
+            screen.afterMouseAction();
+            Screen.wrapScreenError(() -> {
+                if (!ClientHooks.onScreenMouseClickedPre(screen, x, y, button)) {
+                    boolean handled = screen.mouseClicked(x, y, button);
+                    ClientHooks.onScreenMouseClickedPost(screen, x, y, button, handled);
+                }
+            }, "mouseClicked event handler", screen.getClass().getCanonicalName());
+        } else {
+            Screen.wrapScreenError(() -> {
+                if (!ClientHooks.onScreenMouseReleasedPre(screen, x, y, button)) {
+                    boolean handled = screen.mouseReleased(x, y, button);
+                    ClientHooks.onScreenMouseReleasedPost(screen, x, y, button, handled);
+                }
+            }, "mouseReleased event handler", screen.getClass().getCanonicalName());
+        }
+    }
+
     /** Queues a mouse button event onto the main thread (best effort). */
-    private static void submitMouse(int button, int action) {
+    private static void submitMouse(InputContracts.ClickParams p, int action, Screen target) {
         try {
             Minecraft.getInstance().execute(() -> {
                 try {
                     Minecraft mc = Minecraft.getInstance();
-                    dispatch(ON_MOUSE_PRESS, mc.mouseHandler, mc.getWindow().getWindow(), button, action, 0);
+                    if (p.at() == null) {
+                        dispatch(ON_MOUSE_PRESS, mc.mouseHandler, mc.getWindow().getWindow(), p.button(), action, 0);
+                    } else if (mc.screen == target && mc.getOverlay() == null
+                            && (action == InputConstants.RELEASE || p.at().inside(target.width, target.height))) {
+                        dispatchScreenClick(target, p.at(), p.button(), action);
+                    }
                 } catch (Throwable t) {
                     SiriusBridge.LOGGER.debug("sirius-bridge: mouse event dispatch failed: {}", t.toString());
                 }
@@ -409,7 +453,7 @@ final class InputTools {
     }
 
     /** First-press outcome: optional evidence shot pixels + the open screen's class name. */
-    private record ClickStart(BufferedImage shot, String screenName) {
+    private record ClickStart(BufferedImage shot, String screenName, Screen target) {
     }
 
     private record Evidence(String file, long bytes) {

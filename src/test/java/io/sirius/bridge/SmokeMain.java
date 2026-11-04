@@ -293,14 +293,22 @@ public final class SmokeMain {
         expectInvalid(() -> InputContracts.clickParams(json("{\"button\":0,\"count\":1,\"hold_ms\":100}")),
                 "input.click: explicit count 1 + hold_ms still rejected");
 
+        c = validParams(() -> InputContracts.clickParams(json("{\"button\":0,\"at\":{\"x\":12.5,\"y\":0}}")));
+        check(c.at().inside(13, 1) && !c.at().inside(12, 1) && !c.at().inside(13, 0),
+                "input.click: GUI coordinates use exclusive upper bounds");
+        expectInvalid(() -> InputContracts.clickParams(json("{\"button\":0,\"at\":{\"x\":0}}")),
+                "input.click: GUI point requires both coordinates");
+        expectInvalid(() -> InputContracts.clickParams(json("{\"button\":0,\"at\":{\"x\":-1,\"y\":0}}")),
+                "input.click: GUI point rejects negative coordinates");
+
         // --- input.click schedule: the timed PRESS/RELEASE plan (pure, so the
         // hold timing is verifiable without a client)
         List<InputContracts.ScheduledClick> tap = InputContracts.clickSchedule(
-                new InputContracts.ClickParams(0, 1, null));
+                new InputContracts.ClickParams(0, 1, null, null));
         check(tap.size() == 1 && !tap.get(0).press() && tap.get(0).delayMs() == InputContracts.CLICK_HOLD_MS,
                 "input.click: default schedule = single RELEASE at +25ms (v1.0 unchanged)");
         List<InputContracts.ScheduledClick> burst = InputContracts.clickSchedule(
-                new InputContracts.ClickParams(0, 3, null));
+                new InputContracts.ClickParams(0, 3, null, null));
         boolean burstOrder = burst.size() == 5;
         boolean[] burstPresses = {false, true, false, true, false};
         long[] burstDelays = {25, 50, 75, 100, 125};
@@ -309,12 +317,12 @@ public final class SmokeMain {
         }
         check(burstOrder, "input.click: count 3 schedule = R@25 P@50 R@75 P@100 R@125 (v1.0 unchanged)");
         List<InputContracts.ScheduledClick> hold = InputContracts.clickSchedule(
-                new InputContracts.ClickParams(0, 1, 600));
+                new InputContracts.ClickParams(0, 1, 600, null));
         check(hold.size() == 1 && !hold.get(0).press() && hold.get(0).delayMs() == 600
                         && hold.get(0).delayMs() > InputContracts.CLICK_HOLD_MS,
                 "input.click: hold_ms schedule = single RELEASE delayed to +600ms");
         List<InputContracts.ScheduledClick> zeroHold = InputContracts.clickSchedule(
-                new InputContracts.ClickParams(2, 1, 0));
+                new InputContracts.ClickParams(2, 1, 0, null));
         check(zeroHold.size() == 1 && zeroHold.get(0).delayMs() == 0,
                 "input.click: hold_ms 0 schedules the RELEASE immediately");
 
@@ -3531,8 +3539,8 @@ public final class SmokeMain {
     private static void capabilitiesCatalog() throws Exception {
         JsonObject index = readSchema("index.json");
         JsonObject tools = index.getAsJsonObject("categories").getAsJsonObject("tools");
-        check("1.12".equals(index.get("protocol_version").getAsString()),
-                "capabilities: index.json advertises protocol_version 1.12");
+        check(Capabilities.PROTOCOL_VERSION.equals(index.get("protocol_version").getAsString()),
+                "capabilities: index.json advertises the server protocol version");
         List<String> expected = Arrays.asList("inventory.select", "chat.history", "baritone.status",
                 "useItem", "entity.use", "entity.attack", "baritone.goto", "baritone.follow", "baritone.settings",
                 "baritone.stop", "baritone.tunnel", "block.get", "container.clickSlot", "container.transfer",

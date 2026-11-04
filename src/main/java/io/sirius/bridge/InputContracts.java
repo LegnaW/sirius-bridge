@@ -226,7 +226,13 @@ public final class InputContracts {
      * {@code holdMs} later - which is why {@code count} and {@code hold_ms}
      * are mutually exclusive (a hold cannot repeat).
      */
-    public record ClickParams(int button, int count, Integer holdMs) {
+    public record ClickParams(int button, int count, Integer holdMs, GuiPoint at) {
+    }
+
+    public record GuiPoint(double x, double y) {
+        boolean inside(int width, int height) {
+            return x >= 0 && y >= 0 && x < width && y < height;
+        }
     }
 
     /**
@@ -298,7 +304,20 @@ public final class InputContracts {
                         + " hold_ms is a single held press (drop count), count repeats quick taps (drop hold_ms)");
             }
         }
-        return new ClickParams(button, count, holdMs);
+        GuiPoint at = null;
+        JsonElement point = params.get("at");
+        if (point != null) {
+            if (!point.isJsonObject()) {
+                throw new ToolContracts.InvalidParams("input.click at must be a GUI coordinate object");
+            }
+            Double x = finiteNumber(point.getAsJsonObject(), "x", "input.click");
+            Double y = finiteNumber(point.getAsJsonObject(), "y", "input.click");
+            if (x == null || y == null || x < 0 || y < 0) {
+                throw new ToolContracts.InvalidParams("input.click at requires nonnegative finite numeric x and y");
+            }
+            at = new GuiPoint(x, y);
+        }
+        return new ClickParams(button, count, holdMs, at);
     }
 
     // ------------------------------------------------------------------ click schedule

@@ -2,7 +2,7 @@
 
 NeoForge mod running on the **real Minecraft client**, acting as the "eyes and hands" of the Sirius AI brain: screenshot capture, structured perception, input and action primitives, and event push. This is the standalone development repository for the bridge; its protocol schemas and build do not depend on a sibling checkout.
 
-> Current status: **protocol 1.12**, with 33 advertised tools covering perception,
+> Current status: **protocol 1.13**, with 33 advertised tools covering perception,
 > single-block state, real container transactions, GUI and inventory state, input,
 > block/entity actions, events, client chat, and direct Baritone API control. The
 > schemas checked into `schema/` are the contract served by `capabilities/list`
@@ -89,7 +89,7 @@ When the client reaches the title screen, the mod starts a WebSocket server:
 - **Capabilities**: `capabilities/list` returns the frozen capabilities
   (name/version/input_schema) assembled from the schema JSON files copied into
   the jar at build time from `schema` (single source of truth;
-  see "Schema sync" below). Protocol version: `"1.12"`. The server rejects startup
+  see "Schema sync" below). Protocol version: `"1.13"`. The server rejects startup
   if an advertised tool has no registered handler or a registered tool other than
   the built-in `capabilities/list` method is not advertised.
 
@@ -409,7 +409,7 @@ exactly like a human mouse move. Result includes the GUI-scaled position
 (`gui_scaled`) the game derives with the same formula `MouseHandler.onPress`
 uses - handy for GUI clicking math.
 
-### `input.click({ button, count? })`
+### `input.click({ button, count?, hold_ms?, at? })`
 
 Clicks at the CURRENT cursor position (set it with `input.mouseMove`
 first). `button`: 0 left / 1 right / 2 middle. `count` (1..8, default 1):
@@ -417,6 +417,13 @@ extra clicks repeat every 50 ms (press held 25 ms); count 2 = double-click.
 With a GUI open the press goes through `Screen.mouseClicked`; without one it
 is attack (left) / use (right) / pick (middle) via `KeyMapping`, and an
 ungrabbed cursor re-grabs first - all authentic paths.
+
+With protocol 1.13, optional at: {x,y} targets the current Screen in GUI-scaled
+coordinates while the client is ticking, including when its window lacks focus.
+It requires an open Screen without an overlay and an in-bounds point. The Bridge
+dispatches NeoForge Screen press/release hooks without moving the cursor; scheduled
+events are guarded by Screen identity. The result acknowledges dispatch, and a
+widget may consume, ignore or cancel an event. Hover and drag are separate paths.
 
 **GUI click evidence (spec 7.1)**: when a Screen is open and
 `gui_click_evidence = true`, the framebuffer is captured right before the

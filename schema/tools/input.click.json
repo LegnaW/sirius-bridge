@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "description": "input.click({ button, count, hold_ms? })。spec §8.2；hold_ms 为 M3.5 v1.1 增强。\n\nhold_ms（0..10000）有值时按下→等待→抬起（挖掘式长按）；缺省 = 25ms tap 不变。",
+  "description": "input.click({ button, count?, hold_ms?, at? })。spec §8.2；hold_ms 为 M3.5 v1.1 增强。\n\nhold_ms（0..10000）有值时按下→等待→抬起（挖掘式长按）；缺省 = 25ms tap 不变。",
   "properties": {
     "button": {
       "title": "Button",
@@ -11,6 +11,15 @@
       "minimum": 1,
       "title": "Count",
       "type": "integer"
+    },
+    "at": {
+      "description": "Optional coordinates in the current GUI's scaled units (protocol 1.13).",
+      "type": "object",
+      "properties": {
+        "x": { "type": "number", "minimum": 0 },
+        "y": { "type": "number", "minimum": 0 }
+      },
+      "required": ["x", "y"]
     },
     "hold_ms": {
       "anyOf": [

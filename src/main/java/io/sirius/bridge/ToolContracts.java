@@ -326,7 +326,7 @@ public final class ToolContracts {
      * additive response fields, no protocol break for older brains.
      *
      * <p>v1.6 (M5.0) appends the environment facts the agent had to screenshot
-     * for: {@code windowFocused} (a GUI click silently needs a focused window),
+     * for: {@code windowFocused} (vanilla hover and drag need focus),
      * the day clock ({@code dayTime}/{@code day}/{@code isDay}/{@code hasSky} -
      * the nether/end have no daylight, hence the separate sky flag), weather
      * and the biome id.

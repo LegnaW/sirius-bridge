@@ -188,7 +188,7 @@ final class PerceptionTools {
                 player.isAlive(),
                 player.getYRot(),   // M4.1 v1.3: view direction (unstuck fan base / turn diagnostics)
                 player.getXRot(),
-                mc.isWindowActive(),                       // GUI clicks silently need a focused window
+                mc.isWindowActive(),                       // vanilla hover and drag need focus
                 dayTime,
                 ToolContracts.dayNumberOf(rawDayTime),
                 ToolContracts.isDayTime(dayTime),

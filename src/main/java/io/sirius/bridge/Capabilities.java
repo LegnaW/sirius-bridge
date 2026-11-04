@@ -55,8 +55,9 @@ public final class Capabilities {
      * 1.10 adds single-block state reads and real container transactions for scripts.
      * 1.11 adds raw block/entity/container/connection/Baritone event sources for connection-side scripts.
      * 1.12 adds action-layer player-inventory drops with an optional exact count.
+     * 1.13 adds optional GUI coordinates to input.click.
      */
-    public static final String PROTOCOL_VERSION = "1.12";
+    public static final String PROTOCOL_VERSION = "1.13";
 
     /** Per-capability version (the Python mock advertises "1.0" for every tool). */
     public static final String TOOL_VERSION = "1.0";
