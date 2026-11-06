@@ -58,7 +58,7 @@ public final class Capabilities {
      * 1.13 adds optional GUI coordinates to input.click.
      * 1.14 adds strict target validation to dig.
      */
-    public static final String PROTOCOL_VERSION = "1.15";
+    public static final String PROTOCOL_VERSION = "1.17";
 
     /** Per-capability version (the Python mock advertises "1.0" for every tool). */
     public static final String TOOL_VERSION = "1.0";

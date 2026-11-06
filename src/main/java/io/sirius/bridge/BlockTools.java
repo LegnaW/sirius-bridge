@@ -55,7 +55,9 @@ final class BlockTools {
                 id != null ? id.toString() : "unknown", properties);
         boolean dry = blockState.getFluidState().isEmpty();
         result.addProperty("air", blockState.isAir() && dry);
-        result.addProperty("breakable", blockState.getDestroySpeed(level, pos) >= 0 && dry);
+        result.addProperty("breakable", blockState.getDestroySpeed(level, pos) >= 0
+                && !(blockState.getBlock() instanceof net.minecraft.world.level.block.LiquidBlock)
+                && !blockState.is(Blocks.BUBBLE_COLUMN));
         result.addProperty("passable", passable(level, pos, blockState));
         double height = supportHeight(level, pos, blockState);
         result.addProperty("safe_support", height > 0);

@@ -70,7 +70,7 @@ public final class DigContracts {
     public static final double DROPS_SCAN_RADIUS = 4.0;
 
     /** Validated {@code dig} params: integer block position + optional timeout_ms. */
-    public record DigParams(int x, int y, int z, int timeoutMs, String expectedBlock) {
+    public record DigParams(int x, int y, int z, int timeoutMs, String expectedBlock, boolean safetyChecks, boolean autoTool) {
     }
 
     /**
@@ -89,7 +89,20 @@ public final class DigContracts {
                 blockCoord(params, "x"),
                 blockCoord(params, "y"),
                 blockCoord(params, "z"),
-                timeoutMs(params), expected == null ? null : expected.getAsString());
+                timeoutMs(params), expected == null ? null : expected.getAsString(),
+                ToolContracts.booleanMember(params, "safety_checks", true),
+                ToolContracts.booleanMember(params, "auto_tool", false));
+    }
+
+    public record ToolCandidate(int slot, boolean correct, double speed, boolean silk, int cost) {}
+
+    public static boolean betterTool(ToolCandidate candidate, ToolCandidate best, boolean preferSilk) {
+        if (best == null) return true;
+        if (candidate.correct() != best.correct()) return candidate.correct();
+        int speed = Double.compare(candidate.speed(), best.speed());
+        if (speed != 0) return speed > 0;
+        if (preferSilk && candidate.silk() != best.silk()) return candidate.silk();
+        return candidate.cost() < best.cost();
     }
 
     private static int blockCoord(JsonObject params, String member) throws ToolContracts.InvalidParams {

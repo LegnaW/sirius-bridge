@@ -14,6 +14,8 @@
       "title": "Z",
       "type": "integer"
     },
+    "auto_tool": { "type": "boolean", "default": false, "description": "Select an eligible hotbar tool before mining; respects Baritone itemSaver/useSwordToMine/preferSilkTouch." },
+    "safety_checks": { "type": "boolean", "default": true },
     "expected_block": { "type": "string", "pattern": "^[a-z0-9_.-]+:[a-z0-9_./-]+$" },
     "timeout_ms": {
       "anyOf": [

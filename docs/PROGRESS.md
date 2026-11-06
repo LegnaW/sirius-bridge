@@ -1,8 +1,12 @@
 # sirius-bridge 当前进度
 
-最后更新：2026-11-04
+最后更新：2026-11-07
 
-## 当前状态：协议 1.15
+- 0.1.2 发布检查：Bridge 协议 1.17，764 项 smoke 与 Whale 312 项测试通过。测试客户端已备份替换 0.1.2 jar 并核对 SHA-256；需重启 Minecraft/DSH，真机待验。详见 docs/sessions/2026-11-07-release.md。
+
+- 2026-11-05 自动切工具：Bridge 1.17 dig(auto_tool)，core.gather 自动开启。仅快捷栏，按正确掉落/速度/附魔选择并遵守 Baritone 耐久保护等设置，挖掘中重选；无工具返回 wrong_tool。Bridge build 与 764 项 smoke、Whale 312 项测试通过。规格见 docs/sessions/2026-11-05-auto-tool.md；生存模式真机待验。
+
+## 当前状态：协议 1.17
 
 - dig 支持严格方块目标，视角输出归一化且内部维持连续转向。
 
@@ -59,3 +63,5 @@
 4. 回归 `sirius_baritone` 的 follow 状态、`sirius_stop`、新 walk/follow 取代和 init 接管；取消不应产生丢失提醒。
 5. 继续完成 damage、周期维护和默认 damage 拉取的既有真机验收。
 6. 真机结果补入本轮会话记录；当前各组改动尚未再次提交，提交前按逻辑单元拆分并只纳入相关文件。
+
+- dig 支持显式关闭补充安全检查；长方体采集使用此选项。真机待验。

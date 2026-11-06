@@ -1483,6 +1483,23 @@ public final class SmokeMain {
         check("minecraft:iron_ore".equals(validParams(() -> DigContracts.digParams(
                         json("{\"x\":0,\"y\":64,\"z\":0,\"expected_block\":\"minecraft:iron_ore\"}"))).expectedBlock()),
                 "dig: strict target accepts namespaced block ID");
+        check(!validParams(() -> DigContracts.digParams(json("{\"x\":0,\"y\":64,\"z\":0}"))).autoTool(), "dig: auto_tool defaults off");
+        check(validParams(() -> DigContracts.digParams(json("{\"x\":0,\"y\":64,\"z\":0,\"auto_tool\":true}"))).autoTool(), "dig: auto_tool enabled");
+        expectInvalid(() -> DigContracts.digParams(json("{\"x\":0,\"y\":64,\"z\":0,\"auto_tool\":\"true\"}")), "dig: auto_tool rejects strings");
+        var correctSlow = new DigContracts.ToolCandidate(1, true, 2, false, 1);
+        var incorrectFast = new DigContracts.ToolCandidate(2, false, 50, false, 1);
+        check(DigContracts.betterTool(correctSlow, incorrectFast, false), "auto tool: harvest tier beats speed");
+        check(!DigContracts.betterTool(incorrectFast, correctSlow, false), "auto tool: no downgrade to incorrect tool");
+        check(DigContracts.betterTool(new DigContracts.ToolCandidate(2, true, 12, false, 3), correctSlow, false), "auto tool: faster enchanted tool wins");
+        check(DigContracts.betterTool(new DigContracts.ToolCandidate(2, true, 2, true, 3), correctSlow, true), "auto tool: silk tie preference");
+        check(DigContracts.betterTool(new DigContracts.ToolCandidate(2, true, 2, false, 0), correctSlow, false), "auto tool: cheaper equal-speed tool");
+        check(!DigContracts.betterTool(new DigContracts.ToolCandidate(2, true, 2, false, 1), correctSlow, false), "auto tool: stable equal candidates");
+        check(validParams(() -> DigContracts.digParams(json("{\"x\":0,\"y\":64,\"z\":0}"))).safetyChecks(),
+                "dig: old callers retain safety checks");
+        check(!validParams(() -> DigContracts.digParams(json("{\"x\":0,\"y\":64,\"z\":0,\"safety_checks\":false}"))).safetyChecks(),
+                "dig: caller can explicitly disable supplemental safety checks");
+        expectInvalid(() -> DigContracts.digParams(json("{\"x\":0,\"y\":64,\"z\":0,\"safety_checks\":\"false\"}")),
+                "dig: safety_checks rejects string booleans");
         JsonObject look = LookContracts.lookResult(10, -5, -90, 30);
         check(look.get("in_game").getAsBoolean() && look.get("looked").getAsBoolean()
                         && look.get("yaw").getAsDouble() == -90.0 && look.get("pitch").getAsDouble() == 30.0

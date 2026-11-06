@@ -2,7 +2,7 @@
 
 NeoForge mod running on the **real Minecraft client**, acting as the "eyes and hands" of the Sirius AI brain: screenshot capture, structured perception, input and action primitives, and event push. This is the standalone development repository for the bridge; its protocol schemas and build do not depend on a sibling checkout.
 
-> Current status: **protocol 1.15**, with 33 advertised tools covering perception,
+> Current status: **protocol 1.17**, with 33 advertised tools covering perception,
 > single-block state, real container transactions, GUI and inventory state, input,
 > block/entity actions, events, client chat, and direct Baritone API control. The
 > schemas checked into `schema/` are the contract served by `capabilities/list`
@@ -89,7 +89,7 @@ When the client reaches the title screen, the mod starts a WebSocket server:
 - **Capabilities**: `capabilities/list` returns the frozen capabilities
   (name/version/input_schema) assembled from the schema JSON files copied into
   the jar at build time from `schema` (single source of truth;
-  see "Schema sync" below). Protocol version: `"1.15"`. The server rejects startup
+  see "Schema sync" below). Protocol version: `"1.17"`. The server rejects startup
   if an advertised tool has no registered handler or a registered tool other than
   the built-in `capabilities/list` method is not advertised.
 
@@ -652,6 +652,8 @@ Pipeline (per call, game access on the client main thread):
 
 Protocol 1.14 adds optional expected_block (namespaced registry ID) to dig. This mode requires a visible matching target and never breaks an occluder. Results include target_changed, blocked_sight, wrong_tool and unsafe_support. Protocol 1.15 strict dig permits ordinary water nearby and requires a known dry landing within a three-block fall before removing current support. Look and getStats report yaw in [-180, 180).
 
+Protocol 1.16 adds safety_checks (default true) to dig. False skips the Bridge liquid-neighbour, falling-block and support-removal guards. Target identity, strict sight checks, tool validation, reach, permissions and server authority remain active.
+
 ## The place tool (M4.4 v1.4)
 
 `place({x, y, z, face?, item?, timeout_ms?})` is the **placing** counterpart of
@@ -1204,3 +1206,7 @@ src/main/resources/assets/sirius_bridge/   Asset placeholder
   opt-in push channel, M2-D the permission tiers (`observe` is the
   read-only mode). A future token-scoped tier could reuse
   `PermissionContracts` per connection instead of per config.
+
+### Protocol 1.17: dig auto_tool
+
+`dig` accepts `auto_tool` (boolean, default false). When enabled, it selects from hotbar slots 0..8 before mining and rechecks before each attack advance, including occluders and broken-tool replacement. Main inventory tools are not moved. Actual block-state/item properties and NeoForge harvest checks determine eligibility; correct drops take priority over speed. Speed ranking includes main-hand mining-efficiency attributes/enchantments; ties use Baritone preferSilkTouch and material cost, preserving the current slot for equivalent choices. Baritone itemSaver/itemSaverThreshold and useSwordToMine apply. The explicit dig option operates independently of Baritone autoTool/assumeExternalAutoTool, which govern Baritone's own movement. No eligible tool returns wrong_tool without deliberately destroying an unharvestable block. Custom mod break-speed events beyond item properties can affect actual speed, so ranking is an estimate. Server authority remains unchanged. Callers must serialize this operation with inventory selection.

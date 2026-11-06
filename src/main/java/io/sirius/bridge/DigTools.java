@@ -310,11 +310,8 @@ final class DigTools {
             if (!p.expectedBlock().equals(blockName)) {
                 return new StartOutcome("target_changed", null, blockName, null, false, null);
             }
-            if (unsafeSupport(level, player, target)) {
+            if (p.safetyChecks() && unsafeSupport(level, player, target)) {
                 return new StartOutcome("unsafe_support", null, blockName, null, false, null);
-            }
-            if (!player.hasCorrectToolForDrops(state)) {
-                return new StartOutcome("wrong_tool", null, blockName, null, false, null);
             }
             if (!hasTargetSight(level, player, target)) {
                 return new StartOutcome("blocked_sight", null, blockName, null, false, null);
@@ -322,16 +319,21 @@ final class DigTools {
         }
 
         // Safe-to-break minimal set (ported from Numen-style rules):
-        String blocked = p.expectedBlock() != null && dangerousFluid(state.getFluidState())
+        String blocked = !p.safetyChecks() ? null : p.expectedBlock() != null && dangerousFluid(state.getFluidState())
                 ? "target contains dangerous fluid" : liquidNeighbor(level, target, p.expectedBlock() != null);
         if (blocked != null) {
             return new StartOutcome(BLOCKED_LIQUID, null, blockName, blocked, false, null);
         }
-        blocked = fallingAbove(level, target);
+        blocked = p.safetyChecks() ? fallingAbove(level, target) : null;
         if (blocked != null) {
             return new StartOutcome(BLOCKED_FALLING, null, blockName, blocked, false, null);
         }
 
+        if (p.autoTool() ? !AutoTool.select(player, level, target, state)
+                : p.expectedBlock() != null && !player.hasCorrectToolForDrops(state, level, target)) {
+            return new StartOutcome("wrong_tool", null, blockName,
+                    "no suitable held tool; auto_tool searches eligible hotbar slots 0..8 only", false, null);
+        }
         boolean instaMine = state.getDestroyProgress(player, level, target) >= 1.0F;
         // M3.6 T3: pre-dig snapshot of the item entities already near the
         // target - the drop report diffs against it so a neighbouring (foreign)
@@ -340,7 +342,7 @@ final class DigTools {
         // Smooth aim at the block center (300 deg/s); supersedes any active turn.
         double[] rotation = LookContracts.rotationTowards(
                 eye.x, eye.y, eye.z, center.x, center.y, center.z);
-        ActiveDig dig = installMonitor(target, blockName, p.timeoutMs(), instaMine, dropsSeenBefore, p.expectedBlock() != null);
+        ActiveDig dig = installMonitor(target, blockName, p.timeoutMs(), instaMine, dropsSeenBefore, p.expectedBlock() != null, p.safetyChecks(), p.autoTool());
         dig.turn = TurnController.begin(rotation[0], rotation[1], DigContracts.DIG_AIM_TURN_SPEED_DEG_S);
         return new StartOutcome(STARTED, null, blockName, null, instaMine, dig);
     }
@@ -428,6 +430,8 @@ final class DigTools {
         final String blockId;
         final long startedMs;
         final boolean strictTarget;
+        final boolean safetyChecks;
+        final boolean autoTool;
         /** M3.6: item-entity uuids near the target BEFORE the dig (drop diff base). */
         final java.util.Set<String> dropsSeenBefore;
         final CountDownLatch done = new CountDownLatch(1);
@@ -438,7 +442,9 @@ final class DigTools {
         volatile String note;
 
         ActiveDig(DigContracts.DigMonitor monitor, BlockPos target, String blockId, long startedMs,
-                  java.util.Set<String> dropsSeenBefore, boolean strictTarget) {
+                  java.util.Set<String> dropsSeenBefore, boolean strictTarget, boolean safetyChecks, boolean autoTool) {
+            this.safetyChecks = safetyChecks;
+            this.autoTool = autoTool;
             this.strictTarget = strictTarget;
             this.monitor = monitor;
             this.target = target;
@@ -466,14 +472,14 @@ final class DigTools {
      * superseding (and stopping) any active one. Main thread only.
      */
     private static ActiveDig installMonitor(BlockPos target, String blockId, int timeoutMs,
-                                            boolean instaMine, java.util.Set<String> dropsSeenBefore, boolean strictTarget) {
+                                            boolean instaMine, java.util.Set<String> dropsSeenBefore, boolean strictTarget, boolean safetyChecks, boolean autoTool) {
         if (active != null) {
             release(Minecraft.getInstance());
             active.complete(DigContracts.RESULT_NOT_DIGGING, active.monitor.sawOccluder(), "superseded by another dig");
             active = null;
         }
         ActiveDig dig = new ActiveDig(new DigContracts.DigMonitor(timeoutMs, instaMine), target, blockId,
-                System.currentTimeMillis(), dropsSeenBefore, strictTarget);
+                System.currentTimeMillis(), dropsSeenBefore, strictTarget, safetyChecks, autoTool);
         active = dig;
         return dig;
     }
@@ -519,10 +525,15 @@ final class DigTools {
 
         BlockState state = level.getBlockState(dig.target);
         boolean targetGone = state.isAir() || !dig.blockId.equals(blockId(state));
+        if (!targetGone && dig.autoTool && dig.strictTarget
+                && !AutoTool.select(player, level, dig.target, state)) {
+            failTool(mc, dig, dig.target, state);
+            return;
+        }
         if (dig.strictTarget && (!level.hasChunkAt(dig.target) || !targetGone
-                && (unsafeSupport(level, player, dig.target)
-                || !player.hasCorrectToolForDrops(state) || !hasTargetSight(level, player, dig.target)
-                || dangerousFluid(state.getFluidState()) || liquidNeighbor(level, dig.target, true) != null || fallingAbove(level, dig.target) != null
+                && ((dig.safetyChecks && (unsafeSupport(level, player, dig.target)
+                || dangerousFluid(state.getFluidState()) || liquidNeighbor(level, dig.target, true) != null || fallingAbove(level, dig.target) != null))
+                || !player.hasCorrectToolForDrops(state, level, dig.target) || !hasTargetSight(level, player, dig.target)
                 || player.getEyePosition().distanceTo(Vec3.atCenterOf(dig.target)) > DigContracts.REACH))) {
             abortActive("strict dig target is no longer safe or reachable");
             return;
@@ -599,6 +610,7 @@ final class DigTools {
             return;
         }
         BlockHitResult hit = currentHit(mc, dig);
+        if (!prepareTool(mc, dig, hit)) return;
         mc.gameMode.startDestroyBlock(hit.getBlockPos(), hit.getDirection());
         mc.player.swing(InteractionHand.MAIN_HAND);
     }
@@ -609,9 +621,26 @@ final class DigTools {
             return;
         }
         BlockHitResult hit = currentHit(mc, dig);
+        if (!prepareTool(mc, dig, hit)) return;
         if (mc.gameMode.continueDestroyBlock(hit.getBlockPos(), hit.getDirection())) {
             mc.player.swing(InteractionHand.MAIN_HAND);
         }
+    }
+
+    private static boolean prepareTool(Minecraft mc, ActiveDig dig, BlockHitResult hit) {
+        if (!dig.autoTool) return true;
+        BlockPos pos = hit.getBlockPos();
+        BlockState state = mc.level.getBlockState(pos);
+        if (AutoTool.select(mc.player, mc.level, pos, state)) return true;
+        failTool(mc, dig, pos, state);
+        return false;
+    }
+
+    private static void failTool(Minecraft mc, ActiveDig dig, BlockPos pos, BlockState state) {
+        release(mc);
+        dig.complete("wrong_tool", dig.monitor.sawOccluder(), "no eligible hotbar tool for " + blockId(state)
+                + " at " + pos.toShortString() + "; check tool tier, durability and Baritone itemSaver/useSwordToMine");
+        active = null;
     }
 
     /** Stops the held destroy (progress resets server-side, like vanilla). */
