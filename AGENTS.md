@@ -7,15 +7,15 @@
 - 本仓库只负责 Minecraft 客户端桥：WebSocket 协议、感知、动作、事件推送和 Baritone API 集成。
 - 构建与协议不得依赖兄弟仓库。`schema/` 是本仓库自有的协议契约，`syncToolSchemas` 在构建时复制进 jar。
 - `BRIDGE.md` 是接口与行为的唯一技术权威；改协议、事件字段、结果词表或限制时必须同步。
-- `docs/PROGRESS.md` 只记当前做到哪、验证到哪、下一步是什么；详细设计写入对应的 `docs/sessions/` 文件。
+- `../sirius-progress/bridge/docs/PROGRESS.md` 只记当前做到哪、验证到哪、下一步是什么；详细设计写入对应的 `../sirius-progress/bridge/docs/sessions/` 文件。
 - `README.md` 保持简短，负责人读入口，不复制技术细节。
 
 ## 2. 每轮开工
 
-1. 阅读本文件、`docs/PROGRESS.md`、`BRIDGE.md` 的相关章节和最近一篇会话记录。
+1. 阅读本文件、`../sirius-progress/bridge/docs/PROGRESS.md`、`BRIDGE.md` 的相关章节和最近一篇会话记录。
 2. 用 `git status --short` 检查未提交改动。保留用户和其它轮次的工作，不覆盖、不提交、不清理不属于自己的文件。
 3. 行为变更先说明根因或需求、提出方案和主要取舍，得到用户确认后再写代码。纯文档、明确的小修复和用户已确认的实施步骤可直接继续。
-4. 非平凡变更先在 `docs/sessions/YYYY-MM-DD-<主题>.md` 写下方案、接口、验收方式；补记历史工作时必须标明是补记，不伪称事前完成。
+4. 非平凡变更先在 `../sirius-progress/bridge/docs/sessions/YYYY-MM-DD-<主题>.md` 写下方案、接口、验收方式；补记历史工作时必须标明是补记，不伪称事前完成。
 
 ## 3. 实施纪律
 
@@ -35,7 +35,7 @@
 2. **自动验证**：在仓库根运行 `./gradlew.bat build`；它必须包含并通过 `smokeTest`。另跑 `git diff --check`。
 3. **真机口径**：本地构建通过不等于真机通过。需要游戏验证的项目必须记录实际步骤与结果；未启动游戏或未复测就明确写“真机待验”。
 4. **清理与状态**：删除本轮临时脚本、日志和探针产物，保留用户已有文件；结束前再查 `git status --short`。
-5. **进度记录**：补全会话记录的文件改动、问题、测试和遗留项，并更新 `docs/PROGRESS.md`。
+5. **进度记录**：补全会话记录的文件改动、问题、测试和遗留项，并更新 `../sirius-progress/bridge/docs/PROGRESS.md`。
 6. **交付**：向用户摘要改动与证据。只有用户明确要求时才提交或推送；提交按逻辑单元拆分，不夹带无关改动。
 
 ## 5. 部署与真机验证
@@ -53,5 +53,5 @@
 | `README.md` | 项目与文档入口 | 定位或入口变化 |
 | `BRIDGE.md` | 协议、架构、行为和限制 | 任何相关实现变化 |
 | `schema/` | jar 实际发布的工具契约 | 工具参数或能力变化 |
-| `docs/PROGRESS.md` | 跨会话状态锚点 | 每轮结束 |
-| `docs/sessions/` | 方案、规格和收尾证据 | 每轮非平凡变更 |
+| `../sirius-progress/bridge/docs/PROGRESS.md` | 跨会话状态锚点 | 每轮结束 |
+| `../sirius-progress/bridge/docs/sessions/` | 方案、规格和收尾证据 | 每轮非平凡变更 |
